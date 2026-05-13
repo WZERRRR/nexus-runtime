@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Activity, Bell, Layout, Menu, Moon, Search, Settings, Sun } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';

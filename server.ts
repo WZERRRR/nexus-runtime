@@ -25,37 +25,14 @@ try {
   WS_DIRS.forEach(d => fs.mkdirSync(path.join(process.cwd(), 'runtime/workspaces', d), { recursive: true }));
   fs.mkdirSync(path.join(process.cwd(), 'runtime/backups'), { recursive: true });
   
-  // Ensure Global Infrastructure Root structure for demo if not present, but usually this is a real server path
+  // Ensure the infrastructure root exists without creating fake runtime projects.
   if (!fs.existsSync(GLOBAL_ROOT)) {
     try {
       fs.mkdirSync(GLOBAL_ROOT, { recursive: true });
-      fs.writeFileSync(path.join(GLOBAL_ROOT, 'system.log'), `[NEXUS OS] Infrastructure nodes online. ${new Date().toISOString()}`);
       fs.mkdirSync(path.join(GLOBAL_ROOT, 'nginx/conf.d'), { recursive: true });
       fs.mkdirSync(path.join(GLOBAL_ROOT, 'deployments'), { recursive: true });
-      
-      // Simulate real infrastructure folders for the OS to see
-      const simulatedProjects = [
-        { name: 'dev.linkpro-sa.com', type: 'node' },
-        { name: 'linkpro-sa.com', type: 'laravel' },
-        { name: 'tcore.site', type: 'flutter' },
-        { name: 'nexus-runtime', type: 'node' },
-        { name: 'dieaya-plus', type: 'web' }
-      ];
-
-      simulatedProjects.forEach(proj => {
-        const projPath = path.join(GLOBAL_ROOT, proj.name);
-        fs.mkdirSync(projPath, { recursive: true });
-        fs.writeFileSync(path.join(projPath, 'index.html'), `<h1>Production Site: ${proj.name}</h1>`);
-        
-        if (proj.type === 'node') fs.writeFileSync(path.join(projPath, 'package.json'), '{}');
-        if (proj.type === 'laravel') fs.writeFileSync(path.join(projPath, 'artisan'), '');
-        if (proj.type === 'flutter') fs.writeFileSync(path.join(projPath, 'pubspec.yaml'), '');
-        if (proj.type === 'web') fs.mkdirSync(path.join(projPath, 'public_html'), { recursive: true });
-        
-        fs.mkdirSync(path.join(projPath, '.git'), { recursive: true });
-      });
     } catch(e) {
-      console.warn("Could not setup infrastructure mock, ensure real paths exist if intended", e);
+      console.warn("Could not initialize infrastructure root. Discovery will use existing readable paths only.", e);
     }
   }
 } catch(e) {}
@@ -611,20 +588,22 @@ async function startServer() {
     }
   };
 
-  const parseWindowsNetstat = (raw: string) => raw
+  const parseListeningPorts = (raw: string) => raw
     .split(/\r?\n/)
     .map(line => line.trim())
-    .filter(line => line.includes("LISTENING"))
+    .filter(line => line.includes("LISTENING") || line.includes("LISTEN"))
     .map(line => {
       const parts = line.split(/\s+/);
-      const local = parts[1] || "";
+      const isSs = parts[0] === "tcp" || parts[0] === "udp";
+      const local = isSs ? (parts[4] || "") : (parts[1] || "");
       const portMatch = local.match(/:(\d+)$/);
+      const processInfo = line.match(/pid=(\d+),/);
       return {
-        protocol: parts[0],
+        protocol: (parts[0] || "").toUpperCase(),
         localAddress: local,
         port: portMatch ? Number(portMatch[1]) : null,
-        state: parts[3],
-        pid: parts[4],
+        state: isSs ? parts[1] : parts[3],
+        pid: processInfo?.[1] || (isSs ? null : parts[4]),
       };
     })
     .filter(item => item.port);
@@ -661,41 +640,140 @@ async function startServer() {
     return domains;
   };
 
-  const discoverRuntimePaths = () => {
-    const root = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
-    try {
-      return fs.readdirSync(root, { withFileTypes: true })
-        .filter(entry => entry.isDirectory())
-        .map(entry => {
-          const runtimePath = path.join(root, entry.name);
-          const markers = {
-            node: fs.existsSync(path.join(runtimePath, "package.json")),
-            laravel: fs.existsSync(path.join(runtimePath, "artisan")),
-            flutter: fs.existsSync(path.join(runtimePath, "pubspec.yaml")),
-            git: fs.existsSync(path.join(runtimePath, ".git")),
-            publicRoot: fs.existsSync(path.join(runtimePath, "public")) || fs.existsSync(path.join(runtimePath, "public_html")),
-          };
-          const stat = fs.statSync(runtimePath);
-          return {
-            name: entry.name,
-            path: runtimePath,
-            type: markers.node ? "Node.js" : markers.laravel ? "Laravel" : markers.flutter ? "Flutter" : markers.publicRoot ? "Web" : "Directory",
-            markers,
-            modified: stat.mtime,
-          };
+  const getDirectorySize = (targetPath: string, maxEntries = 600) => {
+    let total = 0;
+    let visited = 0;
+    const walk = (currentPath: string) => {
+      if (visited >= maxEntries) return;
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(currentPath, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (visited >= maxEntries) return;
+        if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "vendor") continue;
+        const entryPath = path.join(currentPath, entry.name);
+        visited += 1;
+        try {
+          if (entry.isDirectory()) {
+            walk(entryPath);
+          } else if (entry.isFile()) {
+            total += fs.statSync(entryPath).size;
+          }
+        } catch {
+          // Ignore unreadable files. Discovery must be non-destructive.
+        }
+      }
+    };
+    walk(targetPath);
+    return total;
+  };
+
+  const classifyRuntime = (runtimePath: string) => {
+    const markers = {
+      node: fs.existsSync(path.join(runtimePath, "package.json")),
+      vite: fs.existsSync(path.join(runtimePath, "vite.config.ts")) || fs.existsSync(path.join(runtimePath, "vite.config.js")),
+      next: fs.existsSync(path.join(runtimePath, "next.config.js")) || fs.existsSync(path.join(runtimePath, "next.config.mjs")),
+      laravel: fs.existsSync(path.join(runtimePath, "artisan")),
+      flutter: fs.existsSync(path.join(runtimePath, "pubspec.yaml")),
+      git: fs.existsSync(path.join(runtimePath, ".git")),
+      build: fs.existsSync(path.join(runtimePath, "dist")) || fs.existsSync(path.join(runtimePath, "build")) || fs.existsSync(path.join(runtimePath, ".next")),
+      publicRoot: fs.existsSync(path.join(runtimePath, "public")) || fs.existsSync(path.join(runtimePath, "public_html")),
+    };
+
+    const type = markers.next ? "NextJS"
+      : markers.vite ? "Vite"
+      : markers.node ? "NodeJS"
+      : markers.laravel ? "Laravel"
+      : markers.flutter ? "Flutter"
+      : markers.publicRoot ? "Static"
+      : "Directory";
+
+    const lowerPath = runtimePath.toLowerCase();
+    const environment = lowerPath.includes("backup") ? "Backup"
+      : lowerPath.includes("snapshot") ? "Snapshot"
+      : lowerPath.includes("archive") ? "Archived"
+      : lowerPath.includes("dev") || lowerPath.includes("staging") ? "Development"
+      : lowerPath.includes("live") || lowerPath.includes("prod") ? "Production"
+      : "Development";
+
+    return { markers, type, environment };
+  };
+
+  const discoverRuntimePaths = (pm2Processes: any[] = [], domains: any[] = []) => {
+    const roots = Array.from(new Set([
+      GLOBAL_ROOT,
+      "/var/www",
+      "/home",
+      "/opt",
+      process.cwd(),
+    ])).filter(root => {
+      try {
+        return fs.existsSync(root) && fs.statSync(root).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+
+    const discovered = new Map<string, any>();
+    for (const root of roots) {
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(root, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries.filter(item => item.isDirectory())) {
+        const runtimePath = path.join(root, entry.name);
+        if (discovered.has(runtimePath)) continue;
+        const { markers, type, environment } = classifyRuntime(runtimePath);
+        const hasRuntimeSignal = Object.values(markers).some(Boolean);
+        if (!hasRuntimeSignal) continue;
+
+        const stat = fs.statSync(runtimePath);
+        const pm2Process = pm2Processes.find(proc => {
+          const cwd = proc?.pm2_env?.pm_cwd || proc?.pm2_env?.cwd;
+          return cwd === runtimePath || proc?.name === entry.name || proc?.pm2_env?.name === entry.name;
         });
-    } catch {
-      return [];
+        const domain = domains.find(domain => domain.rootPath === runtimePath || domain.name?.includes(entry.name));
+
+        discovered.set(runtimePath, {
+          name: entry.name,
+          path: runtimePath,
+          type,
+          environment,
+          source: markers.git ? "GitHub" : "Local Runtime",
+          markers,
+          domain: domain?.name || null,
+          pm2Process: pm2Process?.name || null,
+          pm2Status: pm2Process?.pm2_env?.status || null,
+          cpu: pm2Process?.monit?.cpu ?? null,
+          ram: pm2Process?.monit?.memory ?? null,
+          uptime: pm2Process?.pm2_env?.pm_uptime || null,
+          restarts: pm2Process?.pm2_env?.restart_time ?? null,
+          health: pm2Process ? (pm2Process?.pm2_env?.status === "online" ? "Healthy" : "Warning") : "Offline",
+          deployState: markers.build ? "Build detected" : "Source only",
+          lastDeploy: stat.mtime,
+          sizeBytes: getDirectorySize(runtimePath),
+          modified: stat.mtime,
+        });
+      }
     }
+
+    return Array.from(discovered.values());
   };
 
   app.get("/api/runtime/infrastructure/discovery", async (req, res) => {
     const startedAt = Date.now();
     try {
+      const portCommand = os.platform() === "win32" ? "netstat -ano" : "ss -tulnp || netstat -tulnp";
       const [telemetry, pm2Result, netstatResult, dockerResult, projects, dbNodes] = await Promise.all([
         withTimeout(getRuntimeTelemetry().catch(() => null), 2500, null),
         withTimeout(execJson("pm2 jlist", 2500), 3000, { stdout: "", stderr: "", error: "انتهت مهلة قراءة PM2" }),
-        withTimeout(execJson("netstat -ano", 2500), 3000, { stdout: "", stderr: "", error: "انتهت مهلة قراءة المنافذ" }),
+        withTimeout(execJson(portCommand, 2500), 3000, { stdout: "", stderr: "", error: "انتهت مهلة قراءة المنافذ" }),
         withTimeout(execJson("docker ps --format \"{{json .}}\"", 2500), 3000, { stdout: "", stderr: "", error: "Docker غير متوفر أو انتهت المهلة" }),
         withTimeout(getProjects().catch(() => []), 2500, []),
         withTimeout(Promise.resolve(getNodes()).catch(() => []), 2500, []),
@@ -708,9 +786,9 @@ async function startServer() {
         pm2Processes = [];
       }
 
-      const ports = parseWindowsNetstat(netstatResult.stdout);
+      const ports = parseListeningPorts(netstatResult.stdout);
       const domains = discoverNginxDomains();
-      const runtimePaths = discoverRuntimePaths();
+      const runtimePaths = discoverRuntimePaths(pm2Processes, domains);
       const containers = dockerResult.stdout
         .split(/\r?\n/)
         .filter(Boolean)
@@ -728,6 +806,21 @@ async function startServer() {
         ...domains.map(domain => domain.proxyPort).filter(Boolean).map(Number),
       ]);
 
+      const networkUsage = (telemetry?.network || []).reduce((total: number, net: any) => total + Number(net.rx_sec || 0) + Number(net.tx_sec || 0), 0);
+      const correlatedPorts = ports.map(port => {
+        const pm2Process = pm2Processes.find(proc => {
+          const runtimePort = Number(proc?.pm2_env?.PORT || proc?.pm2_env?.port || proc?.pm2_env?.env?.PORT);
+          return runtimePort && runtimePort === Number(port.port);
+        });
+        const domain = domains.find(domain => Number(domain.proxyPort) === Number(port.port));
+        const runtime = runtimePaths.find(runtime => runtime.pm2Process === pm2Process?.name || runtime.domain === domain?.name);
+        return {
+          ...port,
+          runtime: runtime?.name || pm2Process?.name || domain?.name || null,
+          service: pm2Process?.name || domain?.name || null,
+        };
+      });
+
       const primaryNode = {
         id: "local-host",
         name: os.hostname(),
@@ -741,11 +834,11 @@ async function startServer() {
         uptimeSeconds: os.uptime(),
         runtimeCount: runtimePaths.length,
         pm2Count: pm2Processes.length,
-        portCount: ports.length,
+        portCount: correlatedPorts.length,
         domainCount: domains.length,
         containerCount: containers.length,
         health: pm2Result.error && pm2Processes.length === 0 ? "degraded" : "healthy",
-        networkStatus: ports.length > 0 ? "listening" : "idle",
+        networkStatus: correlatedPorts.length > 0 ? "listening" : "idle",
       };
 
       const registeredNodes = (dbNodes || []).map((node: any) => ({
@@ -788,7 +881,8 @@ async function startServer() {
             nodes: nodes.length,
             runtimePaths: runtimePaths.length,
             pm2Processes: pm2Processes.length,
-            activePorts: ports.length,
+            activePorts: correlatedPorts.length,
+            activeServices: correlatedPorts.filter(port => port.service || port.runtime).length,
             domains: domains.length,
             containers: containers.length,
             registeredProjects: projects.length,
@@ -804,6 +898,14 @@ async function startServer() {
             memoryTotal,
             memoryUsed,
             memoryFree,
+            diskTotal: telemetry?.disk?.total || 0,
+            diskUsed: telemetry?.disk?.used || 0,
+            diskFree: telemetry?.disk?.available || 0,
+            diskUsage: telemetry?.disk?.usePercent ?? null,
+            networkUsage,
+            networkInterfaces: telemetry?.network || [],
+            ioUsage: telemetry?.processes?.blocked || 0,
+            runtimeLatencyMs: Date.now() - startedAt,
           },
           pm2: {
             available: !pm2Result.error,
@@ -821,11 +923,12 @@ async function startServer() {
             })),
           },
           services: {
-            ports,
+            ports: correlatedPorts,
             containers,
             domains,
           },
           runtimePaths,
+          discoveryWorkspace: runtimePaths,
           projects,
           relationships,
         },
@@ -834,7 +937,6 @@ async function startServer() {
       res.status(500).json({ success: false, message: e.message });
     }
   });
-
   app.get("/api/runtime/sessions", (req, res) => {
     res.json({ success: true, data: getActiveSessions() });
   });
