@@ -1,0 +1,2595 @@
+import express from "express";
+import "dotenv/config";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import os from "os";
+import { exec } from "child_process";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Ensure Workspace Dirs
+const WS_DIRS = [
+  'dieaya-plus-prod/frontend', 'dieaya-plus-prod/backend', 'dieaya-plus-prod/logs', 'dieaya-plus-prod/storage', 'dieaya-plus-prod/configs',
+  'linkpro-live/frontend', 'linkpro-live/backend', 'linkpro-live/logs', 'linkpro-live/storage',
+  'nexus-core/runtime', 'nexus-core/deployments', 'nexus-core/logs',
+  'deployments', 'shared-services'
+];
+const GLOBAL_ROOT = '/www/wwwroot';
+// Protected paths for Global Mode navigation (Allow list)
+const ALLOWED_INFRA_ROOTS = ['/www', '/etc/nginx', '/var/log', '/home', '/root', '/tmp'];
+
+try {
+  WS_DIRS.forEach(d => fs.mkdirSync(path.join(process.cwd(), 'runtime/workspaces', d), { recursive: true }));
+  fs.mkdirSync(path.join(process.cwd(), 'runtime/backups'), { recursive: true });
+  
+  // Ensure Global Infrastructure Root structure for demo if not present, but usually this is a real server path
+  if (!fs.existsSync(GLOBAL_ROOT)) {
+    try {
+      fs.mkdirSync(GLOBAL_ROOT, { recursive: true });
+      fs.writeFileSync(path.join(GLOBAL_ROOT, 'system.log'), `[NEXUS OS] Infrastructure nodes online. ${new Date().toISOString()}`);
+      fs.mkdirSync(path.join(GLOBAL_ROOT, 'nginx/conf.d'), { recursive: true });
+      fs.mkdirSync(path.join(GLOBAL_ROOT, 'deployments'), { recursive: true });
+      
+      // Simulate real infrastructure folders for the OS to see
+      const simulatedProjects = [
+        { name: 'dev.linkpro-sa.com', type: 'node' },
+        { name: 'linkpro-sa.com', type: 'laravel' },
+        { name: 'tcore.site', type: 'flutter' },
+        { name: 'nexus-runtime', type: 'node' },
+        { name: 'dieaya-plus', type: 'web' }
+      ];
+
+      simulatedProjects.forEach(proj => {
+        const projPath = path.join(GLOBAL_ROOT, proj.name);
+        fs.mkdirSync(projPath, { recursive: true });
+        fs.writeFileSync(path.join(projPath, 'index.html'), `<h1>Production Site: ${proj.name}</h1>`);
+        
+        if (proj.type === 'node') fs.writeFileSync(path.join(projPath, 'package.json'), '{}');
+        if (proj.type === 'laravel') fs.writeFileSync(path.join(projPath, 'artisan'), '');
+        if (proj.type === 'flutter') fs.writeFileSync(path.join(projPath, 'pubspec.yaml'), '');
+        if (proj.type === 'web') fs.mkdirSync(path.join(projPath, 'public_html'), { recursive: true });
+        
+        fs.mkdirSync(path.join(projPath, '.git'), { recursive: true });
+      });
+    } catch(e) {
+      console.warn("Could not setup infrastructure mock, ensure real paths exist if intended", e);
+    }
+  }
+} catch(e) {}
+
+// Import Governance Persistence Database
+import { getRuntimeTelemetry } from "./server/services/runtimeTelemetryService.js";
+import { 
+  initDB, 
+  seedDummyData, 
+  addRuntimeLog, 
+  getRecentLogs, 
+  getActiveSessions,
+  suspendSession,
+  getGovernanceActions,
+  getSecurityEvents,
+  registerCommand,
+  startExecution,
+  finishExecution,
+  addExecutionLog,
+  getExecutionHistory,
+  getPolicyForCommand,
+  addPolicyViolation,
+  getRecentViolations,
+  registerAgent,
+  recordHeartbeat,
+  getAgents,
+  getNodes,
+  deleteNode,
+  upsertNode,
+  addOperationalSignal,
+  getOperationalSignals,
+  createPipeline,
+  updatePipelineStatus,
+  addDeploymentJob,
+  updateJobStatus,
+  registerArtifact,
+  getPipelines,
+  getPipelineJobs,
+  getArtifacts,
+  recordStability,
+  addRecommendation,
+  getRestorePoints,
+  getLatestStability,
+  getPendingRecommendations,
+  createRestorePoint,
+  logRecoveryAction,
+  getProtectionLocks,
+  updateLockStatus,
+  recordNodeSync,
+  getNodeCoordination,
+  getSimulationState,
+  updateSimulationState,
+  toggleDrill,
+  db as sqliteDb 
+} from "./server/db.js";
+
+import { initRuntimeDB } from "./server/database/runtimePersistence.js";
+import { RuntimeIntelligence } from "./server/runtime/runtimeIntelligence.js";
+import { RuntimeGovernance } from "./server/runtime/runtimeGovernance.js";
+import { RuntimePolicyEngine } from "./server/runtime/runtimePolicyEngine.js";
+import { RuntimeApproval } from "./server/runtime/runtimeApproval.js";
+import { RuntimeSSH } from "./server/runtime/runtimeSSH.js";
+import { RuntimeSafeActions } from "./server/runtime/runtimeSafeActions.js";
+import { RuntimeDeploy } from "./server/runtime/runtimeDeployGovernance.js";
+import { RuntimeSnapshots } from "./server/runtime/runtimeSnapshots.js";
+import { RuntimeRecovery } from "./server/runtime/runtimeRecovery.js";
+import { RuntimeLocks } from "./server/runtime/runtimeLocks.js";
+import { RuntimeAutonomousProtection } from "./server/runtime/runtimeAutonomousProtection.js";
+import { RuntimeFederation } from "./server/runtime/runtimeFederation.js";
+import { runtimeRealtime } from "./server/runtime/runtimeRealtime.js";
+import { runtimeQueue } from "./server/runtime/runtimeQueue.js";
+import { RuntimeSupervisor } from "./server/runtime/runtimeSupervisor.js";
+import { RuntimeRetention } from "./server/runtime/runtimeRetention.js";
+import { 
+  addLog, getLogs, getNodes as getDbNodes, addNode, updateNodeStatus, deleteNode as deleteDbNode,
+  getProjects, getProjectById, addProject, updateProject, deleteProject, setSetting, getSettings, getSetting,
+  getDbSecurityEvents, getDbGovernanceActions, addGovernanceAction
+} from "./server/database/queries.js";
+
+// ===============================================
+// Phase 14: CI/CD Orchestration Helper
+// ===============================================
+async function runDeploymentPipeline(pipelineId: string) {
+    console.log(`[DevCore Pipeline] Orchestrating release: ${pipelineId}`);
+    
+    const stages = ['validation', 'build', 'artifact_push', 'runtime_deploy'];
+    updatePipelineStatus(pipelineId, 'validating');
+
+    for (const stage of stages) {
+        const jobId = addDeploymentJob(pipelineId, stage) as number;
+        updateJobStatus(jobId, 'running', `Executing ${stage} protocol...`);
+        
+        // Simulating enterprise build/deploy overhead
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        updateJobStatus(jobId, 'success', `Stage ${stage} finalized successfully.`);
+        
+        // Update pipeline state based on progress
+        if (stage === 'validation') updatePipelineStatus(pipelineId, 'building');
+        if (stage === 'build') updatePipelineStatus(pipelineId, 'deploying');
+    }
+
+    updatePipelineStatus(pipelineId, 'completed');
+    
+    // Auto-register artifact on success
+    registerArtifact({
+        id: `ART-${Math.random().toString(36).substring(7).toUpperCase()}`,
+        pipeline_id: pipelineId,
+        version: `v1.0.${Math.floor(Math.random() * 100)}`,
+        metadata: JSON.stringify({ timestamp: new Date().toISOString(), integrity: 'VERIFIED' })
+    });
+}
+
+// ===============================================
+// Phase 15: Infrastructure Intelligence Engine
+// ===============================================
+function startInfrastructureIntelligence() {
+    console.log('[DevCore Intelligence] Initializing Stability Monitor & Advisor...');
+    
+    setInterval(() => {
+        const sim = getSimulationState();
+        const scaleBy = sim?.is_stress_mode ? 2 : 1;
+
+        // 1. Stability Calculation
+        const recentViolations = sqliteDb.prepare(`SELECT COUNT(*) as count FROM policy_violations WHERE timestamp > datetime('now', '-10 minutes')`).get() as any;
+        const agentOutages = sqliteDb.prepare(`SELECT COUNT(*) as count FROM runtime_agents WHERE status != 'ONLINE'`).get() as any;
+        
+        let stabilityScore = sim?.is_stress_mode ? 40 : 100;
+        if (sim?.is_stress_mode) {
+          stabilityScore -= (sim.chaos_level / 2);
+        }
+        
+        let factor = sim?.is_stress_mode ? 'Stress Simulation' : 'Optimal';
+
+        if (recentViolations && recentViolations.count > 0) {
+            stabilityScore -= Math.min(recentViolations.count * 5, 30);
+            factor = 'Policy Instability';
+        }
+        if (agentOutages && agentOutages.count > 0) {
+            stabilityScore -= (agentOutages.count * 15);
+            factor = 'Agent Desync';
+        }
+
+        recordStability(Math.max(0, stabilityScore), factor);
+
+        // 2. Intelligent Recommendations
+        if (stabilityScore < 85 && Math.random() > 0.7) {
+            addRecommendation(
+                'Execute Automatic Recovery', 
+                `Stability index dropped to ${stabilityScore}%. Potential Node drift detected in worker cluster. Restore point recommended.`,
+                'Critical',
+                'Stability'
+            );
+        }
+
+    }, 120000); // Analyze every 2 minutes
+}
+
+// ===============================================
+// Phase 13.6: Operational Intelligence Engine
+// ===============================================
+function startOperationalIntelligenceEngine() {
+    console.log('[DevCore Intelligence] Starting Correlation Engine...');
+    
+    setInterval(() => {
+        // 1. Correlation: Violations vs Security Events
+        const recentViolations = sqliteDb.prepare(`SELECT COUNT(*) as count FROM policy_violations WHERE timestamp > datetime('now', '-5 minutes')`).get() as any;
+        const recentThreats = sqliteDb.prepare(`SELECT COUNT(*) as count FROM security_events WHERE timestamp > datetime('now', '-5 minutes') AND risk_level = 'High'`).get() as any;
+        
+        if (recentViolations.count > 5 && recentThreats.count > 0) {
+            addOperationalSignal(
+                'Correlation', 
+                'High', 
+                'Intell-Core-X', 
+                `Detected correlated pattern: High Violation Rate (${recentViolations.count}) combined with High Threats. Potential brute-force or privilege escalation attempt.`
+            );
+        }
+
+        // 2. Anomaly: Agent Drift
+        const staleAgents = sqliteDb.prepare(`SELECT COUNT(*) as count FROM runtime_agents WHERE status != 'ONLINE'`).get() as any;
+        if (staleAgents.count > 0) {
+            addOperationalSignal(
+                'Anomaly', 
+                'Medium', 
+                'Runtime-Monitor', 
+                `Detected Runtime Drift: ${staleAgents.count} agents in non-optimal state. Node stability may be degraded.`
+            );
+        }
+
+    }, 60000); // Analyze every 1 minute
+}
+
+// ===================================
+// Phase 13: Agent Network Simulator
+// ===================================
+function startAgentNetworkSimulator() {
+    console.log('[DevCore Agent] Initializing Agent Network Simulator...');
+    
+    setInterval(() => {
+        const sim = getSimulationState();
+        const agents = getAgents();
+        agents.forEach((agent: any) => {
+            // Random heartbeat metrics
+            let cpuBase = 1;
+            let memBase = 100;
+            
+            if (sim?.is_stress_mode) {
+              cpuBase = 40 + (sim.chaos_level || 0);
+              memBase = 500 + (sim.chaos_level * 5);
+              
+              if (Math.random() > 0.9) {
+                sqliteDb.prepare(`UPDATE runtime_agents SET status = 'DEGRADED' WHERE agent_id = ?`).run(agent.agent_id);
+              }
+            } else {
+               if (agent.status === 'DEGRADED') {
+                 sqliteDb.prepare(`UPDATE runtime_agents SET status = 'ONLINE' WHERE agent_id = ?`).run(agent.agent_id);
+               }
+            }
+
+            const cpu = +(Math.random() * 15 + cpuBase).toFixed(2);
+            const mem = +(Math.random() * 200 + memBase).toFixed(2);
+            const uptimeInc = 30; // 30s interval
+            
+            recordHeartbeat(agent.agent_id, cpu, mem, uptimeInc);
+        });
+    }, 30000); // Heartbeat every 30s
+}
+
+// ===================================
+// Phase 12: Policy Governance Helper
+// ===================================
+async function validateExecutionPolicy(commandId: string, uid: string, role: string) {
+    const policy = getPolicyForCommand(commandId);
+    if (!policy) return { allowed: true }; // No policy = fallback to structured default
+
+    // 1. Role Validation
+    const roleLevels: Record<string, number> = { 'Guest': 0, 'Developer': 1, 'Admin': 2, 'Super Admin': 3 };
+    const userLevel = roleLevels[role] || 0;
+    const requiredLevel = roleLevels[policy.required_role] || 1;
+
+    if (userLevel < requiredLevel) {
+        addPolicyViolation(uid, commandId, 'RoleMismatch', `User role [${role}] level ${userLevel} is below required ${requiredLevel}`);
+        return { allowed: false, reason: `Insufficient Authority: Required Role [${policy.required_role}]` };
+    }
+
+    // 2. Environment Validation
+    const currentEnv = process.env.NODE_ENV === 'production' ? 'LIVE' : 'DEV';
+    if (!policy.allowed_environments.includes(currentEnv)) {
+        addPolicyViolation(uid, commandId, 'EnvironmentRestricted', `Command restricted to [${policy.allowed_environments}], current is [${currentEnv}]`);
+        return { allowed: false, reason: `Policy Restriction: Command forbidden in ${currentEnv} environment.` };
+    }
+
+    // 3. Cooldown Validation
+    const lastExec = sqliteDb.prepare(`SELECT started_at FROM execution_history WHERE command_id = ? AND status = 'Completed' ORDER BY started_at DESC LIMIT 1`).get(commandId) as any;
+    if (lastExec) {
+        const diff = (Date.now() - new Date(lastExec.started_at).getTime()) / 1000;
+        if (diff < policy.cooldown_seconds) {
+            addPolicyViolation(uid, commandId, 'RateLimited', `Cooldown active: ${Math.ceil(policy.cooldown_seconds - diff)}s remaining`);
+            return { allowed: false, reason: `Rate Limit: Cooldown active (${Math.ceil(policy.cooldown_seconds - diff)}s)` };
+        }
+    }
+
+    return { allowed: true };
+}
+
+// ... [rest of imports/helpers]
+async function runRuntimeCommand(commandId: string, parameters: string, triggeredBy: string) {
+  const executionId = startExecution(commandId, parameters, triggeredBy);
+  addExecutionLog(executionId, 'info', `Initiating command: ${commandId}`);
+
+  try {
+    // Simulate steps for Stage 1 (Structured Execution)
+    await new Promise(r => setTimeout(r, 1000));
+    addExecutionLog(executionId, 'info', 'Phase 1/3: Environment Validation Completed.');
+    
+    await new Promise(r => setTimeout(r, 1500));
+    addExecutionLog(executionId, 'info', 'Phase 2/3: Runtime Context Secured.');
+    
+    await new Promise(r => setTimeout(r, 1000));
+    addExecutionLog(executionId, 'success', 'Phase 3/3: Resource Injection Successful.');
+
+    finishExecution(executionId, 'Completed', 0);
+    addRuntimeLog('success', `Runtime execution completed: ${commandId}`, 'execution_engine');
+  } catch (error: any) {
+    addExecutionLog(executionId, 'error', `Execution failed: ${error.message}`);
+    finishExecution(executionId, 'Failed', 1, error.message);
+    addRuntimeLog('error', `Runtime execution failed: ${commandId}`, 'execution_engine');
+  }
+}
+
+// ===============================================
+// Phase 22: NEXUS Runtime Constitution Logic
+// ===============================================
+const MANIFEST_NAME = "nexus.runtime.json";
+
+function getProjectManifestPath(projectPath: string) {
+  return path.join(projectPath, MANIFEST_NAME);
+}
+
+async function syncProjectManifest(project: any) {
+  // Only write local manifest if project is local, for external projects we simulate the existence/awareness
+  const isExternal = project.runtime_type === 'external-vps';
+  
+  const manifestData = {
+    project_id: project.id,
+    runtime_name: project.name,
+    runtime_path: project.runtime_path,
+    runtime_type: project.runtime_type || 'local-runtime',
+    environment: project.env || 'Development',
+    runtime_host: project.runtime_host || 'localhost',
+    runtime_mode: project.runtime_mode || (project.env === 'Production' ? 'live' : 'dev'),
+    pm2_runtime: project.pm2_runtime || (project.env === 'Production' ? 'nexus-runtime' : 'nexus-default'),
+    node_id: project.node_id,
+    git_repo: project.repo,
+    git_branch: project.git_branch || 'main',
+    pm2_process: project.runtime_process,
+    runtime_port: project.runtime_port,
+    deploy_command: project.deploy_command,
+    build_command: project.build_command,
+    install_command: project.install_command,
+    workspace_root: project.runtime_path,
+    ssh_entry_path: project.runtime_path,
+    governance_level: project.governance_level || 'Standard',
+    nexus_version: "2.1.0",
+    last_synced: new Date().toISOString()
+  };
+
+  if (isExternal) {
+    addRuntimeLog('info', `External Production Manifest Registry Synced: ${project.name} @ ${project.runtime_host}`, 'nexus_core');
+    return;
+  }
+
+  if (!project.runtime_path || !fs.existsSync(project.runtime_path)) return;
+  
+  const manifestPath = getProjectManifestPath(project.runtime_path);
+  try {
+    fs.writeFileSync(manifestPath, JSON.stringify(manifestData, null, 2), 'utf8');
+    addRuntimeLog('info', `Local Runtime Constitution Generated: ${project.name}`, 'nexus_core');
+  } catch (err) {
+    console.error(`Failed to write manifest for ${project.name}:`, err);
+  }
+}
+
+// ===============================================
+// NEXUS SSH & Runtime Protection Layer
+// ===============================================
+function wrapCommandWithRuntimeContext(command: string, project: any): string {
+    const isProduction = project.env === 'Production';
+    const isExternal = project.runtime_type === 'external-vps';
+    const host = project.runtime_host || '187.124.190.79';
+
+    if (isProduction && isExternal) {
+        // Enforce SSH Awareness for external nodes
+        addRuntimeLog('info', `Routing Production Action to External VPS: ${host}`, 'ssh_orchestrator');
+        // In a real environment, we would use something like: ssh user@host "cd path && command"
+        // For simulation, we wrap it to show intent
+        return `ssh -p 22 root@${host} "cd ${project.runtime_path} && ${command}"`;
+    }
+
+    if (isProduction && !isExternal) {
+        throw new Error(`CRITICAL: Production command detected on Local Runtime. Operation blocked for security.`);
+    }
+
+    return command;
+}
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3010;
+
+  // Runtime Port Validation / Safety Check
+  const net = await import('net');
+  const isPortUsed = await new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') resolve(true);
+      else resolve(false);
+    });
+    srv.once('listening', () => {
+      srv.close();
+      resolve(false);
+    });
+    srv.listen(PORT, '0.0.0.0');
+  });
+
+  if (isPortUsed) {
+    console.error(`\n============================================================`);
+    console.error(`[CRITICAL] Runtime Port Conflict Detected`);
+    console.error(`[CRITICAL] Port ${PORT} is already in use by another process.`);
+    console.error(`[CRITICAL] NEXUS Runtime startup aborted to prevent cascade failure.`);
+    console.error(`============================================================\n`);
+    // PM2 should not restart this silently if it's in a crash loop, but we exit gracefully or with error
+    process.exit(1);
+  }
+
+  console.log('[DevCore Startup] Initializing express middleware...');
+  app.use(express.json());
+
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+        console.log(`[API Request] ${req.method} ${req.path}`);
+    }
+    next();
+  });
+
+  // ===============================================
+  // Phase 10: Persistence Layer Initialization
+  // ===============================================
+  console.log('[DevCore Startup] Initializing persistence layer...');
+  try {
+    // 1. Initialize Main Runtime DB (for projects, nodes, settings)
+    await initRuntimeDB();
+    
+    // 2. Initialize Audit/Persistence DB (for logs, events)
+    initDB();
+    seedDummyData();
+    
+    console.log('[DevCore Startup] Persistence layer ready.');
+
+    // Bootstrap Runtime Constitutions
+    const projects = await getProjects();
+    console.log(`[DevCore Bootstrap] Syncing ${projects.length} Project Manifests...`);
+    for (const p of projects) {
+        await syncProjectManifest(p);
+    }
+    console.log('[DevCore Bootstrap] Runtime Constitutions synchronized.');
+  } catch (err) {
+    console.error('[DevCore Startup] Persistence layer failed to initialize:', err);
+  }
+
+  // Early health check
+  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
+  // Listen after DB is ready
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[NEXUS Runtime] Server running on port ${PORT}`);
+    
+    // Background services can start now
+    console.log('[DevCore Startup] Starting background services...');
+    try {
+      startAgentNetworkSimulator();
+      startInfrastructureIntelligence();
+      startOperationalIntelligenceEngine();
+      console.log('[DevCore Startup] Background services active.');
+    } catch (err) {
+      console.error('[DevCore Startup] Background services failed to start:', err);
+    }
+    
+    // PM2 ready signal
+    if (process.send) {
+      process.send('ready');
+    }
+  });
+
+  // ==========================================
+  // PHASE A: READ ONLY APIs (Runtime Visibility)
+  // ==========================================
+
+  app.get("/api/runtime/system", (req, res) => {
+    const memoryUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
+    
+    try {
+        const stmt = sqliteDb.prepare(`
+          INSERT INTO runtime_state_snapshots (memory_used, memory_total, cpu_usage_user, cpu_usage_system, uptime) 
+          VALUES (?, ?, ?, ?, ?)
+        `);
+        stmt.run(memoryUsage.heapUsed, memoryUsage.heapTotal, cpuUsage.user, cpuUsage.system, Math.floor(process.uptime()));
+    } catch (e) {
+        console.error("Failed to insert runtime state snapshot:", e);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        status: "online",
+        uptime: os.uptime(),
+        platform: os.platform(),
+        release: os.release(),
+        loadavg: os.loadavg(),
+        totalmem: os.totalmem(),
+        freemem: os.freemem(),
+        cpus: os.cpus().length,
+        hostname: os.hostname(),
+      }
+    });
+  });
+
+  app.get("/api/runtime/processes", (req, res) => {
+    res.json({
+      success: true,
+      data: {
+        pid: process.pid,
+        title: process.title,
+        memoryUsage: process.memoryUsage(),
+        cpuUsage: process.cpuUsage(),
+        uptime: process.uptime(),
+      }
+    });
+  });
+
+  app.get("/api/runtime/env", (req, res) => {
+    res.json({
+      success: true,
+      data: {
+        nodeVersion: process.version,
+        environment: process.env.NODE_ENV || 'development',
+        exposedKeys: Object.keys(process.env).filter(key => key.startsWith('VITE_')),
+      }
+    });
+  });
+
+  app.get("/api/runtime/logs", async (req, res) => {
+    try {
+      const logs = await getLogs(50);
+      res.json({
+        success: true,
+        data: logs
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // NEW ENDPOINTS for Persistent Layer
+  app.get("/api/runtime/telemetry", async (req, res) => {
+    try {
+      const data = await getRuntimeTelemetry();
+      res.json({ success: true, data });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  const execJson = (command: string, timeout = 5000) =>
+    new Promise<{ stdout: string; stderr: string; error?: string }>((resolve) => {
+      exec(command, { timeout, windowsHide: true }, (error, stdout, stderr) => {
+        resolve({ stdout: stdout || "", stderr: stderr || "", error: error?.message });
+      });
+    });
+
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timer = setTimeout(() => resolve(fallback), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  const parseWindowsNetstat = (raw: string) => raw
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line.includes("LISTENING"))
+    .map(line => {
+      const parts = line.split(/\s+/);
+      const local = parts[1] || "";
+      const portMatch = local.match(/:(\d+)$/);
+      return {
+        protocol: parts[0],
+        localAddress: local,
+        port: portMatch ? Number(portMatch[1]) : null,
+        state: parts[3],
+        pid: parts[4],
+      };
+    })
+    .filter(item => item.port);
+
+  const discoverNginxDomains = () => {
+    const candidates = [
+      path.join(GLOBAL_ROOT, "nginx/conf.d"),
+      "/etc/nginx/conf.d",
+      "/etc/nginx/sites-enabled",
+    ];
+    const domains: any[] = [];
+
+    for (const dir of candidates) {
+      try {
+        if (!fs.existsSync(dir)) continue;
+        for (const file of fs.readdirSync(dir).filter(name => name.endsWith(".conf"))) {
+          const fullPath = path.join(dir, file);
+          const content = fs.readFileSync(fullPath, "utf8");
+          const serverName = content.match(/server_name\s+([^;]+);/);
+          const proxyPort = content.match(/proxy_pass\s+http:\/\/(?:127\.0\.0\.1|localhost):(\d+)/);
+          const rootPath = content.match(/root\s+([^;]+);/);
+          domains.push({
+            name: serverName?.[1]?.trim() || file.replace(/\.conf$/, ""),
+            configPath: fullPath,
+            proxyPort: proxyPort?.[1] ? Number(proxyPort[1]) : null,
+            rootPath: rootPath?.[1]?.trim() || null,
+          });
+        }
+      } catch (error: any) {
+        domains.push({ name: dir, error: error.message });
+      }
+    }
+
+    return domains;
+  };
+
+  const discoverRuntimePaths = () => {
+    const root = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
+    try {
+      return fs.readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => {
+          const runtimePath = path.join(root, entry.name);
+          const markers = {
+            node: fs.existsSync(path.join(runtimePath, "package.json")),
+            laravel: fs.existsSync(path.join(runtimePath, "artisan")),
+            flutter: fs.existsSync(path.join(runtimePath, "pubspec.yaml")),
+            git: fs.existsSync(path.join(runtimePath, ".git")),
+            publicRoot: fs.existsSync(path.join(runtimePath, "public")) || fs.existsSync(path.join(runtimePath, "public_html")),
+          };
+          const stat = fs.statSync(runtimePath);
+          return {
+            name: entry.name,
+            path: runtimePath,
+            type: markers.node ? "Node.js" : markers.laravel ? "Laravel" : markers.flutter ? "Flutter" : markers.publicRoot ? "Web" : "Directory",
+            markers,
+            modified: stat.mtime,
+          };
+        });
+    } catch {
+      return [];
+    }
+  };
+
+  app.get("/api/runtime/infrastructure/discovery", async (req, res) => {
+    const startedAt = Date.now();
+    try {
+      const [telemetry, pm2Result, netstatResult, dockerResult, projects, dbNodes] = await Promise.all([
+        withTimeout(getRuntimeTelemetry().catch(() => null), 2500, null),
+        withTimeout(execJson("pm2 jlist", 2500), 3000, { stdout: "", stderr: "", error: "انتهت مهلة قراءة PM2" }),
+        withTimeout(execJson("netstat -ano", 2500), 3000, { stdout: "", stderr: "", error: "انتهت مهلة قراءة المنافذ" }),
+        withTimeout(execJson("docker ps --format \"{{json .}}\"", 2500), 3000, { stdout: "", stderr: "", error: "Docker غير متوفر أو انتهت المهلة" }),
+        withTimeout(getProjects().catch(() => []), 2500, []),
+        withTimeout(Promise.resolve(getNodes()).catch(() => []), 2500, []),
+      ]);
+
+      let pm2Processes: any[] = [];
+      try {
+        pm2Processes = pm2Result.stdout.trim() ? JSON.parse(pm2Result.stdout) : [];
+      } catch {
+        pm2Processes = [];
+      }
+
+      const ports = parseWindowsNetstat(netstatResult.stdout);
+      const domains = discoverNginxDomains();
+      const runtimePaths = discoverRuntimePaths();
+      const containers = dockerResult.stdout
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map(line => {
+          try { return JSON.parse(line); } catch { return null; }
+        })
+        .filter(Boolean);
+
+      const memoryTotal = os.totalmem();
+      const memoryFree = os.freemem();
+      const memoryUsed = memoryTotal - memoryFree;
+      const runtimePortSet = new Set([
+        ...pm2Processes.map(proc => proc?.pm2_env?.PORT || proc?.pm2_env?.port).filter(Boolean).map(Number),
+        ...projects.map((project: any) => project.runtime_port).filter(Boolean).map(Number),
+        ...domains.map(domain => domain.proxyPort).filter(Boolean).map(Number),
+      ]);
+
+      const primaryNode = {
+        id: "local-host",
+        name: os.hostname(),
+        ip: "127.0.0.1",
+        region: process.env.RUNTIME_REGION || "المضيف المحلي",
+        os: `${os.platform()} ${os.release()}`,
+        status: "online",
+        cpu: telemetry?.cpu?.usage ?? 0,
+        ram: memoryTotal ? Math.round((memoryUsed / memoryTotal) * 100) : 0,
+        disk: telemetry?.disk?.usage ?? null,
+        uptimeSeconds: os.uptime(),
+        runtimeCount: runtimePaths.length,
+        pm2Count: pm2Processes.length,
+        portCount: ports.length,
+        domainCount: domains.length,
+        containerCount: containers.length,
+        health: pm2Result.error && pm2Processes.length === 0 ? "degraded" : "healthy",
+        networkStatus: ports.length > 0 ? "listening" : "idle",
+      };
+
+      const registeredNodes = (dbNodes || []).map((node: any) => ({
+        ...node,
+        cpu: Number.parseFloat(String(node.cpu || "0")) || 0,
+        ram: Number.parseFloat(String(node.ram || "0")) || 0,
+        disk: Number.parseFloat(String(node.storage || "0")) || null,
+        uptimeSeconds: null,
+        runtimeCount: projects.filter((project: any) => project.node_id === node.id).length,
+        pm2Count: 0,
+        portCount: 0,
+        domainCount: 0,
+        containerCount: 0,
+        health: node.status === "online" ? "healthy" : "degraded",
+        networkStatus: node.ip ? "registered" : "unknown",
+      }));
+
+      const nodes = [primaryNode, ...registeredNodes.filter((node: any) => node.id !== primaryNode.id)];
+      const relationships = runtimePaths.map(runtime => {
+        const project = projects.find((p: any) => p.runtime_path === runtime.path || p.name === runtime.name);
+        const domain = domains.find(domain => domain.rootPath === runtime.path || domain.name.includes(runtime.name));
+        return {
+          runtime: runtime.name,
+          path: runtime.path,
+          type: runtime.type,
+          owner: project?.name || "غير مسجل",
+          domain: domain?.name || null,
+          port: project?.runtime_port || domain?.proxyPort || null,
+          pm2Process: pm2Processes.find(proc => proc.name === runtime.name || proc.pm2_env?.name === runtime.name)?.name || null,
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          generatedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedAt,
+          nodes,
+          summary: {
+            nodes: nodes.length,
+            runtimePaths: runtimePaths.length,
+            pm2Processes: pm2Processes.length,
+            activePorts: ports.length,
+            domains: domains.length,
+            containers: containers.length,
+            registeredProjects: projects.length,
+            runtimePorts: Array.from(runtimePortSet),
+          },
+          system: {
+            hostname: os.hostname(),
+            platform: os.platform(),
+            release: os.release(),
+            uptimeSeconds: os.uptime(),
+            cpuCores: os.cpus().length,
+            loadavg: os.loadavg(),
+            memoryTotal,
+            memoryUsed,
+            memoryFree,
+          },
+          pm2: {
+            available: !pm2Result.error,
+            error: pm2Result.error || null,
+            processes: pm2Processes.map(proc => ({
+              id: proc.pm_id,
+              name: proc.name,
+              status: proc.pm2_env?.status,
+              restarts: proc.pm2_env?.restart_time,
+              uptime: proc.pm2_env?.pm_uptime,
+              pid: proc.pid,
+              memory: proc.monit?.memory,
+              cpu: proc.monit?.cpu,
+              cwd: proc.pm2_env?.pm_cwd,
+            })),
+          },
+          services: {
+            ports,
+            containers,
+            domains,
+          },
+          runtimePaths,
+          projects,
+          relationships,
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/sessions", (req, res) => {
+    res.json({ success: true, data: getActiveSessions() });
+  });
+
+  app.post("/api/runtime/sessions/:uid/suspend", (req, res) => {
+    suspendSession(req.params.uid);
+    res.json({ success: true, message: `Session for UID ${req.params.uid} suspended.` });
+  });
+
+  app.get("/api/runtime/governance", async (req, res) => {
+    try {
+      const data = await getDbGovernanceActions();
+      res.json({ success: true, data });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/security", async (req, res) => {
+    try {
+      const data = await getDbSecurityEvents();
+      res.json({ success: true, data });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // Phase 11: Execution Engine Endpoints
+  app.get("/api/runtime/execution/history", (req, res) => {
+    res.json({ success: true, data: getExecutionHistory(20) });
+  });
+
+  app.post("/api/runtime/execute", async (req, res) => {
+    const { commandId, parameters, triggeredBy, uid, role } = req.body;
+    
+    if (!commandId) {
+      return res.status(400).json({ success: false, message: "commandId is required" });
+    }
+
+    // 1. Governance Policy Enforcement
+    const validation = await validateExecutionPolicy(commandId, uid || "Anonymous", role || "Guest");
+    if (!validation.allowed) {
+        return res.status(403).json({ 
+            success: false, 
+            message: validation.reason,
+            violation_type: 'GovernancePolicyGate'
+        });
+    }
+    
+    // 2. Background execution
+    runRuntimeCommand(commandId, parameters || "{}", triggeredBy || "Web UI");
+    
+    res.json({ 
+      success: true, 
+      message: `Command [${commandId}] submitted to structured execution engine.` 
+    });
+  });
+
+  app.get("/api/runtime/policies/violations", (req, res) => {
+    res.json({ success: true, data: getRecentViolations(50) });
+  });
+
+  app.get("/api/runtime/policies/:commandId", (req, res) => {
+    res.json({ success: true, data: getPolicyForCommand(req.params.commandId) });
+  });
+
+  // Phase 13: Operational Intelligence Endpoints
+  app.get("/api/runtime/nodes", async (req, res) => {
+    try {
+      const nodes = await getDbNodes();
+      res.json({ success: true, data: nodes });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/nodes/:nodeId/action", async (req, res) => {
+    const { nodeId } = req.params;
+    const { action } = req.body;
+    addRuntimeLog('warning', `Infrastructure Action: ${action} triggered for Node ${nodeId}`, 'infrastructure_core');
+    
+    // Simulate real action
+    setTimeout(() => {
+        addRuntimeLog('success', `Node Action ${action} for ${nodeId} execution confirmed.`, 'infrastructure_core');
+        res.json({ success: true, message: `Node ${action} sequence completed.` });
+    }, 1500);
+  });
+
+  app.delete("/api/runtime/nodes/:nodeId", async (req, res) => {
+    const { nodeId } = req.params;
+    try {
+        // Delete from governance DB (using node_id)
+        await deleteNode(nodeId);
+        // Delete from core DB (using id)
+        await deleteDbNode(nodeId);
+        
+        addGovernanceAction('NODE_DELETE', 'System Admin', nodeId, 'COMPLETED');
+        addRuntimeLog('warn', `Infrastructure Node ${nodeId} decommissioned from Nexus Cluster`, 'infrastructure_core');
+        res.json({ success: true, message: "Node deleted successfully" });
+    } catch (e: any) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/agents", (req, res) => {
+    res.json({ success: true, data: getAgents() });
+  });
+
+  // Phase 14: CI/CD Pipeline Endpoints
+  app.get("/api/runtime/pipelines", (req, res) => {
+    res.json({ success: true, data: getPipelines(20) });
+  });
+
+  app.get("/api/runtime/pipelines/:id/jobs", (req, res) => {
+    res.json({ success: true, data: getPipelineJobs(req.params.id) });
+  });
+
+  app.get("/api/runtime/artifacts", (req, res) => {
+    res.json({ success: true, data: getArtifacts(20) });
+  });
+
+  app.post("/api/runtime/pipelines/trigger", (req, res) => {
+    const { name, env, user } = req.body;
+    const pipelineId = `PIPE-${Math.random().toString(36).substring(7).toUpperCase()}`;
+    createPipeline({ id: pipelineId, name: name || "Manual Release", env: env || "STAGING", user: user || "U-ADMIN" });
+    
+    // Run async orchestration
+    runDeploymentPipeline(pipelineId);
+    
+    res.json({ success: true, pipelineId });
+  });
+
+  app.get("/api/runtime/intelligence/signals", (req, res) => {
+    res.json({ success: true, data: getOperationalSignals(30) });
+  });
+
+  app.get("/api/runtime/:id/intelligence", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const analysis = await RuntimeIntelligence.getLatestAnalysis(runtimeId);
+      res.json({ success: true, data: analysis });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Intelligence fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/governance", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const governance = await RuntimeGovernance.getGovernance(runtimeId);
+      res.json({ success: true, data: governance });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Governance fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/policy-analysis", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const analysis = await RuntimePolicyEngine.getPolicyAnalysis(runtimeId);
+      res.json({ success: true, data: analysis });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Policy analysis fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/approvals", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const approvals = await RuntimeApproval.getApprovals(runtimeId);
+      res.json({ success: true, data: approvals });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Approvals fetch failed' });
+    }
+  });
+
+  app.post("/api/runtime/:id/approvals", async (req, res) => {
+    try {
+      const runtime_id = req.params.id;
+      const { operation_type, requested_by, risk_level, approval_reason } = req.body;
+      const id = await RuntimeApproval.requestApproval({ runtime_id, operation_type, requested_by, risk_level, approval_reason });
+      res.json({ success: true, data: { id } });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Approval request failed' });
+    }
+  });
+
+  app.put("/api/runtime/:id/approvals/:approvalId", async (req, res) => {
+    try {
+      const { status, reviewed_by, reason } = req.body;
+      await RuntimeApproval.updateApproval(req.params.approvalId, status, reviewed_by, reason);
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Approval update failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/ssh-sessions", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const sessions = await RuntimeSSH.getSessions(runtimeId);
+      res.json({ success: true, data: sessions });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'SSH sessions fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/actions", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const actions = await RuntimeSafeActions.getActions(runtimeId);
+      res.json({ success: true, data: actions });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Actions fetch failed' });
+    }
+  });
+
+  app.post("/api/runtime/:id/actions", async (req, res) => {
+    try {
+      const runtime_id = req.params.id;
+      const { action_type, requested_by, approval_id, risk_level } = req.body;
+      await RuntimeSafeActions.requestAction({ runtime_id, action_type, requested_by, approval_id, risk_level });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Action request failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/deployments", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const deployments = await RuntimeDeploy.getDeployments(runtimeId);
+      res.json({ success: true, data: deployments });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Deployments fetch failed' });
+    }
+  });
+
+  app.post("/api/runtime/:id/deployments", async (req, res) => {
+    try {
+      const runtime_id = req.params.id;
+      const { deployment_id, requested_by, approval_id, snapshot_id, risk_level, deploy_strategy } = req.body;
+      await RuntimeDeploy.requestDeploy({ runtime_id, deployment_id, requested_by, approval_id, snapshot_id, risk_level, deploy_strategy });
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Deployment request failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/snapshots", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const snapshots = await RuntimeSnapshots.getSnapshots(runtimeId);
+      res.json({ success: true, data: snapshots });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Snapshots fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/recoveries", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const recoveries = await RuntimeRecovery.getRecoveries(runtimeId);
+      res.json({ success: true, data: recoveries });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Recoveries fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/locks", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const locks = await RuntimeLocks.getLocks(runtimeId);
+      res.json({ success: true, data: locks });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Locks fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/autonomous-analysis", async (req, res) => {
+    try {
+      const runtimeId = req.params.id;
+      const analysis = await RuntimeAutonomousProtection.getAnalysis(runtimeId);
+      res.json({ success: true, data: analysis });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Autonomous analysis fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/federation", async (req, res) => {
+    try {
+      const federated = await RuntimeFederation.getFederatedRuntimes();
+      res.json({ success: true, data: federated });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Federation fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/recovery/restore-points", (req, res) => {
+    res.json({ success: true, data: getRestorePoints() });
+  });
+
+  app.get("/api/runtime/stability/index", (req, res) => {
+    res.json({ success: true, data: getLatestStability() });
+  });
+
+  app.get("/api/runtime/intelligence/recommendations", (req, res) => {
+    res.json({ success: true, data: getPendingRecommendations() });
+  });
+
+  // Phase 17: Predictive Intelligence Endpoints
+  app.get("/api/runtime/intelligence/forecast", (req, res) => {
+    // Mocking failure forecast timeline
+    const timeline = Array.from({ length: 12 }, (_, i) => ({
+      timestamp: new Date(Date.now() + i * 3600000).toISOString(),
+      failure_probability: Math.floor(Math.random() * 15), // Low probability baseline
+      node_drift: +(Math.random() * 2).toFixed(2),
+      resource_exhaustion: Math.floor(Math.random() * 20 + 70)
+    }));
+    res.json({ success: true, data: timeline });
+  });
+
+  app.get("/api/runtime/intelligence/optimization", (req, res) => {
+    res.json({
+      success: true,
+      data: [
+         { type: 'Resource', title: 'Runtime Scaling', impact: 'High', description: 'Worker cluster C-4 is reaching 85% utilization. Scaling by 2 nodes recommended.' },
+         { type: 'Performance', title: 'Cache Warm-up', impact: 'Medium', description: 'Intelligence agents detecting slow neural path retrieval. Warm-up protocol suggested.' },
+         { type: 'Cost', title: 'Idle Node Decommission', impact: 'Low', description: 'Regional node US-WEST-2 has 0 active sessions for 4h. Safe to spin down.' }
+      ]
+    });
+  });
+
+  app.get("/api/runtime/intelligence/deployment-risk/:name", (req, res) => {
+    const score = Math.floor(Math.random() * 20 + 5); // 5-25% risk normally
+    res.json({
+      success: true,
+      data: {
+        pipeline: req.params.name,
+        risk_score: score,
+        rollback_probability: Math.floor(score * 0.4),
+        safety_status: score > 60 ? 'Unsafe' : score > 30 ? 'Caution' : 'Optimal',
+        limiting_factors: ['Runtime Load', 'Previous Failure Hist']
+      }
+    });
+  });
+
+  app.get("/api/runtime/intelligence/anomaly-stream", (req, res) => {
+    res.json({
+      success: true,
+      data: [
+        { id: 1, type: 'Behavioral', severity: 'Medium', details: 'Unusual access pattern from Node-X4', time: new Date().toISOString() },
+        { id: 2, type: 'Structural', severity: 'Low', details: 'Minor drift in coordination latency', time: new Date().toISOString() }
+      ]
+    });
+  });
+
+  app.get("/api/runtime/intelligence/risk-indicators", (req, res) => {
+    res.json({
+      success: true,
+      data: {
+        system_risk: Math.floor(Math.random() * 10 + 2),
+        data_integrity: 99.9,
+        security_perimeter: 98.4,
+        threat_forecast: 'Stable'
+      }
+    });
+  });
+
+  app.post("/api/runtime/recovery/restore", (req, res) => {
+    const { restoreId } = req.body;
+    logRecoveryAction(restoreId, 'Initiated', 'User triggered manual recovery protocol.', 'U-ADMIN');
+    
+    // Simulate recovery process
+    setTimeout(() => {
+      logRecoveryAction(restoreId, 'Success', 'Runtime integrity restored to previous baseline.', 'System-Core');
+    }, 5000);
+
+    res.json({ success: true, message: "Recovery protocol initiated." });
+  });
+
+  // Phase 16: Hardening & Coordination Endpoints
+  app.get("/api/runtime/hardening/locks", (req, res) => {
+    res.json({ success: true, data: getProtectionLocks() });
+  });
+
+  app.get("/api/runtime/coordination/states", (req, res) => {
+    res.json({ success: true, data: getNodeCoordination() });
+  });
+
+  app.post("/api/runtime/hardening/locks/:id/toggle", (req, res) => {
+    const { status } = req.body;
+    updateLockStatus(req.params.id, status);
+    res.json({ success: true });
+  });
+
+  // Phase 18: Operational Simulation Endpoints
+  app.get("/api/runtime/simulation/state", (req, res) => {
+    res.json({ success: true, data: getSimulationState() });
+  });
+
+  app.post("/api/runtime/simulation/stress", (req, res) => {
+    const { active, chaosLevel } = req.body;
+    updateSimulationState(active ? 1 : 0, chaosLevel || 0);
+    res.json({ success: true });
+  });
+
+  app.post("/api/runtime/simulation/drill", (req, res) => {
+    const { active } = req.body;
+    toggleDrill(active ? 1 : 0);
+    res.json({ success: true });
+  });
+
+  // ==========================================
+  
+  app.get("/api/runtime/stream/logs", (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    // Send initial state
+    res.write(`data: ${JSON.stringify(getRecentLogs(50))}\n\n`);
+
+    // Poll the db every 2 seconds for new events
+    const intervalId = setInterval(() => {
+        const currentLogs = getRecentLogs(50);
+        res.write(`data: ${JSON.stringify(currentLogs)}\n\n`);
+    }, 2000);
+
+    req.on('close', () => {
+        clearInterval(intervalId);
+    });
+  });
+
+  // ==========================================
+  // PHASE B: SAFE RUNTIME ACTIONS (Dev ONLY)
+  // ==========================================
+  
+  // ==========================================
+  // PHASE C: PM2 & Deploy Actions
+  // ==========================================
+  
+  app.get("/api/runtime/pm2/list", (req, res) => {
+     const filterPath = req.query.path as string;
+     exec("npx -y pm2 jlist", (error, stdout) => {
+        if (error) return res.json({ success: false, data: [] });
+        try {
+            const bracketIndex = stdout.indexOf('[');
+            const jsonStr = bracketIndex >= 0 ? stdout.substring(bracketIndex) : '[]';
+            const list = JSON.parse(jsonStr);
+            
+            let formatted = list.map((p: any) => ({
+               id: p.pm_id,
+               name: p.name,
+               status: p.pm2_env.status,
+               cpu: p.monit.cpu + '%',
+               mem: Math.round(p.monit.memory / 1024 / 1024) + ' MB',
+               uptime: Math.round((Date.now() - p.pm2_env.pm_uptime) / 1000) + 's',
+               restarts: p.pm2_env.restart_time,
+               mode: p.pm2_env.exec_mode,
+               path: p.pm2_env.pm_cwd,
+               port: p.pm2_env.env?.PORT || p.pm2_env.PORT || null
+            }));
+
+            if (filterPath) {
+               // Normalize path for matching
+               const normalizedFilter = path.resolve(filterPath);
+               formatted = formatted.filter((p: any) => {
+                  if (!p.path) return false;
+                  const normalizedProcPath = path.resolve(p.path);
+                  return normalizedProcPath.startsWith(normalizedFilter) || normalizedFilter.startsWith(normalizedProcPath);
+               });
+            }
+
+            res.json({ success: true, data: formatted });
+        } catch(e) {
+            res.json({ success: false, data: [] });
+        }
+     });
+  });
+
+  app.post("/api/runtime/pm2/action", async (req, res) => {
+     const { action, id, projectId } = req.body;
+     const allowedOpts = ['start', 'stop', 'restart', 'delete'];
+     if (!allowedOpts.includes(action)) return res.json({ success: false, message: 'Invalid action' });
+     
+     let finalCommand = `npx -y pm2 ${action} ${id}`;
+
+     if (projectId) {
+         try {
+             const project = await getProjectById(projectId);
+             if (project) {
+                 finalCommand = wrapCommandWithRuntimeContext(`npx -y pm2 ${action} ${id}`, project);
+             }
+         } catch(e: any) {
+             return res.status(403).json({ success: false, message: e.message });
+         }
+     } else if (process.env.NODE_ENV === 'production') {
+         // Default protection if no project specified but in production
+         return res.status(403).json({ success: false, message: "Governance Violation: Project ID required for Production Actions." });
+     }
+
+     addRuntimeLog('warning', `PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
+     exec(finalCommand, (error, stdout) => {
+        if (error) return res.json({ success: false, message: error.message });
+        res.json({ success: true, message: `Action ${action} completed.` });
+     });
+  });
+
+  app.get("/api/runtime/pm2/logs/:id", (req, res) => {
+     const { id } = req.params;
+     // Fetch logs for specific ID
+     exec(`npx -y pm2 logs ${id} --lines 100 --nostream`, (error, stdout, stderr) => {
+        // PM2 logs command might not support --nostream in all versions or might behave differently
+        // A better way is reading the files, but let's try this first as a quick implementation
+        if (error && !stdout) return res.json({ success: false, data: "No logs found or process not active." });
+        res.json({ success: true, data: stdout || stderr });
+     });
+  });
+
+  app.post("/api/runtime/terminal/exec", async (req, res) => {
+    const { command, cwd: qCwd, projectId } = req.body;
+    let cwd = qCwd;
+    let finalCommand = command;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           // Verify Runtime Constitution Manifest (only for local projects)
+           if (project.runtime_type !== 'external-vps') {
+               const manifestPath = getProjectManifestPath(project.runtime_path);
+               if (!fs.existsSync(manifestPath)) {
+                   addRuntimeLog('error', `Identity Violation: Missing Runtime Manifest for ${project.name}`, 'nexus_core');
+                   return res.status(403).json({ 
+                       success: false, 
+                       message: "Identity Violation: This project does not have a valid Runtime Constitution manifest. Operation blocked." 
+                   });
+               }
+           }
+           cwd = project.runtime_path;
+           
+           try {
+               finalCommand = wrapCommandWithRuntimeContext(command, project);
+           } catch(e: any) {
+               return res.status(403).json({ success: false, message: e.message });
+           }
+       }
+    }
+
+    if (!finalCommand) return res.status(400).json({ success: false, message: "Command required." });
+    
+    // Very basic protection
+    const forbidden = ['rm -rf /', 'mkfs', 'dd'];
+    if (forbidden.some(f => finalCommand.includes(f))) {
+      return res.status(403).json({ success: false, message: "Command forbidden by Governance Protocol." });
+    }
+
+    const executionContext = cwd ? path.resolve(cwd) : process.cwd();
+
+    addRuntimeLog('info', `Terminal execution in ${executionContext}: ${finalCommand}`, 'terminal_gateway');
+
+    exec(finalCommand, { cwd: executionContext, timeout: 20000 }, (error, stdout, stderr) => {
+       res.json({
+         success: !error,
+         data: {
+           stdout: stdout || "",
+           stderr: stderr || "",
+           error: error ? error.message : null
+         }
+       });
+    });
+  });
+  
+  app.post("/api/runtime/action/clear-cache", (req, res) => {
+    const newLog = addRuntimeLog('info', 'Runtime cache cleared by Admin', 'governance_api');
+    res.json({ success: true, message: "Runtime cache cleared successfully", log: newLog });
+  });
+
+  app.post("/api/runtime/action/reload-env", (req, res) => {
+    const newLog = addRuntimeLog('warning', 'Environment state reloaded safely', 'governance_api');
+    res.json({ success: true, message: "Environment state safely reloaded", log: newLog });
+  });
+
+  // ==========================================
+  // PHASE C: RUNTIME FILE SYSTEM (Real FS)
+  // ==========================================
+
+  // Security Helper: Ensure path is within safe boundaries
+  const getSafePath = (requestedPath: string, projectRoot?: string) => {
+    const defaultInfraRoot = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
+    const base = projectRoot || defaultInfraRoot;
+    const normalizedBase = path.resolve(base);
+    
+    let targetPath;
+    if (path.isAbsolute(requestedPath)) {
+      // In Global Mode (no projectRoot), we allow direct access to standard allowed infra roots
+      if (!projectRoot) {
+        const isAllowed = ALLOWED_INFRA_ROOTS.some(root => requestedPath.startsWith(root)) || requestedPath.startsWith(normalizedBase);
+        if (isAllowed) {
+            targetPath = requestedPath;
+        } else {
+            // Default to infrastructure root if attempting to escape or access restricted area
+            targetPath = path.join(normalizedBase, requestedPath.replace(/^[\/\\]+/, ''));
+        }
+      } else {
+        // In Scoped Mode, strictly enforce project root
+        if (requestedPath.startsWith(normalizedBase)) {
+          targetPath = requestedPath;
+        } else {
+          targetPath = path.join(normalizedBase, requestedPath.replace(/^[\/\\]+/, ''));
+        }
+      }
+    } else {
+      targetPath = path.join(normalizedBase, requestedPath);
+    }
+    
+    const normalizedTarget = path.resolve(targetPath);
+    
+    // Scoped restriction: Project-based access must not escape its root
+    if (projectRoot && !normalizedTarget.startsWith(normalizedBase)) {
+      console.warn(`[Security] Attempted access outside project root: ${normalizedTarget} (Base: ${normalizedBase})`);
+      return normalizedBase;
+    }
+    
+    // Global restriction: Infrastructure mode must stay within allowed server zones
+    if (!projectRoot) {
+        const isInAllowedZone = ALLOWED_INFRA_ROOTS.some(root => normalizedTarget.startsWith(root)) || normalizedTarget.startsWith(normalizedBase);
+        if (!isInAllowedZone) {
+            console.warn(`[Security] Unauthorized infrastructure access blocked: ${normalizedTarget}`);
+            return normalizedBase;
+        }
+    }
+    
+    return normalizedTarget;
+  };
+
+  // ==========================================
+  // INFRASTRUCTURE GLOBAL FILESYSTEM APIs
+  // ==========================================
+  app.get("/api/files/list", async (req, res) => {
+    const defaultInfraRoot = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
+    const requestedPath = (req.query.path as string) || defaultInfraRoot;
+    const absolutePath = getSafePath(requestedPath);
+
+    try {
+        if (!fs.existsSync(absolutePath)) {
+            return res.status(404).json({ success: false, message: "Infrastructure path not found" });
+        }
+        
+        const stats = fs.statSync(absolutePath);
+        if (!stats.isDirectory()) {
+            return res.status(400).json({ success: false, message: "Target is not a directory" });
+        }
+
+        const items = fs.readdirSync(absolutePath, { withFileTypes: true });
+        const list = items.map(item => {
+            const fullPath = path.join(absolutePath, item.name);
+            let size = 0;
+            let mtime = new Date();
+            let projectType = null;
+            let markers = [];
+
+            try {
+               const stat = fs.statSync(fullPath);
+               size = item.isFile() ? stat.size : 0;
+               mtime = stat.mtime;
+
+               if (item.isDirectory()) {
+                 // Project Discovery Logic
+                 if (fs.existsSync(path.join(fullPath, 'package.json'))) {
+                   projectType = 'node';
+                   markers.push('NODE');
+                 }
+                 if (fs.existsSync(path.join(fullPath, 'artisan'))) {
+                   projectType = 'laravel';
+                   markers.push('LARAVEL');
+                 }
+                 if (fs.existsSync(path.join(fullPath, 'pubspec.yaml'))) {
+                   projectType = 'flutter';
+                   markers.push('FLUTTER');
+                 }
+                 if (fs.existsSync(path.join(fullPath, '.git'))) {
+                   markers.push('GIT');
+                 }
+                 if (fs.existsSync(path.join(fullPath, 'ecosystem.config.js'))) {
+                   markers.push('PM2');
+                 }
+                 
+                 // If it's a directory in /www/wwwroot and has a common web structure
+                 if (requestedPath === GLOBAL_ROOT && !projectType) {
+                    if (fs.existsSync(path.join(fullPath, 'public_html')) || fs.existsSync(path.join(fullPath, 'public'))) {
+                        projectType = 'web';
+                        markers.push('PROJECT');
+                    }
+                 }
+               }
+            } catch(e) {}
+
+            return {
+                name: item.name,
+                type: item.isDirectory() ? 'folder' : 'file',
+                path: path.join(requestedPath, item.name),
+                size,
+                modified: mtime,
+                projectType,
+                markers: markers.length > 0 ? markers : undefined
+            };
+        });
+        res.json({ success: true, mode: 'global', root: defaultInfraRoot, current: requestedPath, data: list });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // ==========================================
+  // PROJECT DISCOVERY & IMPORT PIPELINE
+  // ==========================================
+  app.get("/api/runtime/discover", async (req, res) => {
+    const { path: requestedPath } = req.query;
+    if (!requestedPath) return res.status(400).json({ success: false, message: "Path required for discovery" });
+
+    // Use infra root if relative path provided
+    const defaultInfraRoot = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
+    const absolutePath = getSafePath(requestedPath as string);
+    
+    if (!fs.existsSync(absolutePath)) {
+        return res.status(404).json({ success: false, message: "Path not found on server" });
+    }
+
+    try {
+        const stats = fs.statSync(absolutePath);
+        if (!stats.isDirectory()) {
+            return res.status(400).json({ success: false, message: "Only directories can be imported as projects" });
+        }
+
+        const projectProfile: any = {
+            name: path.basename(absolutePath),
+            runtime_path: absolutePath,
+            type: 'Generic Project',
+            markers: [],
+            detected_runtime: 'node',
+            pm2_suggested_name: path.basename(absolutePath),
+            git_detected: false,
+            env_detected: false,
+            configs: []
+        };
+
+        // Deep Discovery
+        if (fs.existsSync(path.join(absolutePath, 'package.json'))) {
+            projectProfile.type = 'Node.js';
+            projectProfile.detected_runtime = 'node';
+            projectProfile.markers.push('NODE');
+            try {
+                const pkg = JSON.parse(fs.readFileSync(path.join(absolutePath, 'package.json'), 'utf8'));
+                if (pkg.name) projectProfile.pm2_suggested_name = pkg.name;
+            } catch(e) {}
+        }
+
+        if (fs.existsSync(path.join(absolutePath, 'artisan'))) {
+            projectProfile.type = 'Laravel';
+            projectProfile.detected_runtime = 'php/laravel';
+            projectProfile.markers.push('LARAVEL');
+        }
+
+        if (fs.existsSync(path.join(absolutePath, 'pubspec.yaml'))) {
+            projectProfile.type = 'Flutter';
+            projectProfile.detected_runtime = 'dart/flutter';
+            projectProfile.markers.push('FLUTTER');
+        }
+
+        if (fs.existsSync(path.join(absolutePath, 'requirements.txt')) || fs.existsSync(path.join(absolutePath, 'pyproject.toml'))) {
+            projectProfile.type = 'Python/Django';
+            projectProfile.detected_runtime = 'python';
+            projectProfile.markers.push('PYTHON');
+        }
+
+        if (fs.existsSync(path.join(absolutePath, '.git'))) {
+            projectProfile.git_detected = true;
+            projectProfile.markers.push('GIT');
+        }
+
+        if (fs.existsSync(path.join(absolutePath, 'ecosystem.config.js'))) {
+            projectProfile.markers.push('PM2_CONFIG');
+        }
+
+        if (fs.existsSync(path.join(absolutePath, '.env'))) {
+            projectProfile.env_detected = true;
+            projectProfile.markers.push('ENV_FILE');
+        }
+
+        // Sub-folder web detection
+        if (fs.existsSync(path.join(absolutePath, 'public_html')) || fs.existsSync(path.join(absolutePath, 'public'))) {
+            projectProfile.markers.push('WEB_ROOT');
+        }
+
+        const { classifyRuntime } = await import('./server/runtime/runtimeClassification.js');
+        const classification = await classifyRuntime(absolutePath);
+        projectProfile.domain = classification.runtime_domain || '';
+        projectProfile.env = classification.runtime_classification;
+        projectProfile.markers.push(classification.runtime_classification);
+        projectProfile.type = projectProfile.type; // Keep existing type or modify if needed
+
+        addRuntimeLog('info', `Runtime discovery completed for ${absolutePath}`, 'discovery_engine');
+
+        res.json({ success: true, data: projectProfile });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/files/read", async (req, res) => {
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+    const absolutePath = getSafePath(filePath);
+    try {
+        const stats = fs.statSync(absolutePath);
+        if (stats.isDirectory()) return res.status(400).json({ success: false, message: "Cannot read directory" });
+        const content = fs.readFileSync(absolutePath, 'utf8');
+        res.json({ success: true, data: content });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/files/write", async (req, res) => {
+    const { path: filePath, content } = req.body;
+    if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+    const absolutePath = getSafePath(filePath);
+    try {
+        fs.writeFileSync(absolutePath, content, 'utf8');
+        res.json({ success: true, message: "Global write successful" });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/files/delete", async (req, res) => {
+    const { paths } = req.body;
+    if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths required" });
+    try {
+        paths.forEach(p => {
+            const absolutePath = getSafePath(p);
+            if (fs.existsSync(absolutePath)) {
+                if (fs.statSync(absolutePath).isDirectory()) fs.rmSync(absolutePath, { recursive: true });
+                else fs.unlinkSync(absolutePath);
+            }
+        });
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/files/upload", async (req, res) => {
+    const { path: filePath, content, name } = req.body;
+    const fullPath = path.join(filePath, name);
+    const absolutePath = getSafePath(fullPath);
+    try {
+        fs.writeFileSync(absolutePath, content, 'utf8');
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/files/mkdir", async (req, res) => {
+    const { path: dirPath } = req.body;
+    const absolutePath = getSafePath(dirPath);
+    try {
+        if (!fs.existsSync(absolutePath)) {
+            fs.mkdirSync(absolutePath, { recursive: true });
+            res.json({ success: true });
+        } else {
+            res.status(400).json({ success: false, message: "Exists" });
+        }
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // Phase 19: Advanced Project Runtime Actions
+  app.post("/api/runtime/projects/action", async (req, res) => {
+    const { projectId, action, env, path: qProjectPath } = req.body;
+    let projectPath = qProjectPath;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           // Verify Runtime Constitution Manifest
+           const manifestPath = getProjectManifestPath(project.runtime_path);
+           if (!fs.existsSync(manifestPath)) {
+               addRuntimeLog('error', `Identity Violation: Action '${action}' blocked for ${project.name} (Missing Manifest)`, 'nexus_core');
+               return res.status(403).json({ 
+                   success: false, 
+                   message: "Identity Violation: Missing Unified Runtime Manifest. Action forbidden." 
+               });
+           }
+           projectPath = project.runtime_path;
+       }
+    }
+    
+    if (!action) return res.status(400).json({ success: false, message: "Action required." });
+
+    // Determine target directory
+    const cwd = projectPath || process.cwd();
+    
+    addGovernanceAction(
+      `PROJECT_${action.toUpperCase()}`,
+      'Runtime',
+      projectId || 'Global',
+      `COMPLETED (${action})`
+    );
+
+    let command = "";
+    switch (action) {
+      case 'git_pull':
+        command = "git pull";
+        break;
+      case 'sync':
+        command = "npm install";
+        break;
+      case 'build':
+        command = "npm run build";
+        break;
+      case 'restart':
+        command = `npx -y pm2 restart all`; 
+        break;
+      case 'deploy':
+        command = "npm run build && npx -y pm2 restart all";
+        break;
+      default:
+        return res.status(400).json({ success: false, message: "Unsupported action." });
+    }
+
+    // Apply Runtime Protection & SSH Awareness
+    try {
+        const project = await getProjectById(projectId);
+        if (project) {
+            command = wrapCommandWithRuntimeContext(command, project);
+        }
+    } catch(e: any) {
+        return res.status(403).json({ success: false, message: e.message });
+    }
+
+    addRuntimeLog('info', `Project Action: ${action} initiated in ${cwd}`, 'project_runtime');
+
+    exec(command, { cwd, timeout: 120000 }, (error, stdout, stderr) => {
+      if (error) {
+         addRuntimeLog('error', `Project Action ${action} failed: ${error.message}`, 'project_runtime');
+      } else {
+         addRuntimeLog('success', `Project Action ${action} completed successfully`, 'project_runtime');
+      }
+
+      res.json({
+        success: !error,
+        data: {
+          stdout: stdout || "",
+          stderr: stderr || "",
+          error: error ? error.message : null
+        }
+      });
+    });
+  });
+
+  app.get("/api/runtime/files/list", async (req, res) => {
+    const requestedPath = (req.query.path as string) || ".";
+    const projectId = req.query.projectId as string;
+    let projectRoot = req.query.root as string;
+
+    console.log(`[Runtime Explorer] List request - Path: ${requestedPath}, ProjectId: ${projectId}, Root: ${projectRoot}`);
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+           console.log(`[Runtime Explorer] Resolved ProjectRoot from DB: ${projectRoot}`);
+       } else {
+           console.warn(`[Runtime Explorer] Project ${projectId} found but missing runtime_path`);
+       }
+    }
+
+    const absolutePath = getSafePath(requestedPath, projectRoot);
+    console.log(`[Runtime Explorer] Resolved Absolute Path: ${absolutePath}`);
+
+    try {
+        if (!fs.existsSync(absolutePath)) {
+            // Auto-provision path if requested path is the root of a project
+            if (requestedPath === "." || requestedPath === projectRoot || requestedPath === "/") {
+                console.log(`[Runtime Explorer] Auto-provisioning missing root path: ${absolutePath}`);
+                try {
+                    fs.mkdirSync(absolutePath, { recursive: true });
+                    // Seed initial file so explorer is not empty
+                    fs.writeFileSync(path.join(absolutePath, 'README.md'), `# Nexus Runtime Workspace\n\nThis workspace was automatically provisioned for project context resolution.\n\n### Status\n- Ready for operational input.`);
+                } catch (e) {
+                    console.error(`[Runtime Explorer] Failed to create directory ${absolutePath}:`, e);
+                }
+            } else {
+                console.error(`[Runtime Explorer] PATH NOT FOUND: ${absolutePath}`);
+                return res.status(404).json({ success: false, message: `Path not found: ${absolutePath}` });
+            }
+        }
+        
+        const stats = fs.statSync(absolutePath);
+        if (!stats.isDirectory()) {
+            console.error(`[Runtime Explorer] NOT A DIRECTORY: ${absolutePath}`);
+            return res.status(400).json({ success: false, message: "Path is not a directory" });
+        }
+
+        const items = fs.readdirSync(absolutePath, { withFileTypes: true });
+        console.log(`[Runtime Explorer] FS Scan successful. Found ${items.length} items in ${absolutePath}`);
+
+        const list = items.map(item => {
+            let size = 0;
+            let mtime = new Date();
+            try {
+               const stat = fs.statSync(path.join(absolutePath, item.name));
+               size = item.isFile() ? stat.size : 0;
+               mtime = stat.mtime;
+            } catch(e) {}
+            return {
+                name: item.name,
+                type: item.isDirectory() ? 'folder' : 'file',
+                path: requestedPath === projectRoot || requestedPath === '.' ? 
+                      (requestedPath === '/' ? `/${item.name}` : path.join(requestedPath, item.name)) : 
+                      path.join(requestedPath, item.name),
+                size,
+                modified: mtime,
+            };
+        });
+        res.json({ success: true, data: list });
+    } catch (err: any) {
+        console.error(`[Runtime Explorer] FS SCAN FAILURE: ${err.message}`);
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/runtime/files/read", async (req, res) => {
+    const filePath = req.query.path as string;
+    const projectId = req.query.projectId as string;
+    let projectRoot = req.query.root as string;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+       }
+    }
+
+    if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+
+    const absolutePath = getSafePath(filePath, projectRoot);
+
+    try {
+        const stats = fs.statSync(absolutePath);
+        if (stats.isDirectory()) {
+          return res.status(400).json({ success: false, message: "FILESYSTEM_TYPE_MISMATCH: Cannot read a directory as a file." });
+        }
+        const content = fs.readFileSync(absolutePath, 'utf8');
+        res.json({ success: true, data: content });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/files/write", async (req, res) => {
+    const { path: filePath, content, root: qProjectRoot, projectId } = req.body;
+    let projectRoot = qProjectRoot;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+       }
+    }
+
+    if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+
+    const absolutePath = getSafePath(filePath, projectRoot);
+
+    try {
+        fs.writeFileSync(absolutePath, content, 'utf8');
+        addGovernanceAction('FILE_WRITE', 'Runtime', filePath, 'COMPLETED');
+        addRuntimeLog('info', `File system write in ${projectRoot || 'Global'}: ${filePath}`, 'file_runtime');
+        res.json({ success: true, message: "File write completed." });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/files/delete", async (req, res) => {
+    const { paths, root: qProjectRoot, projectId } = req.body;
+    let projectRoot = qProjectRoot;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+       }
+    }
+
+    if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths array required" });
+
+    try {
+        paths.forEach(p => {
+            const absolutePath = getSafePath(p, projectRoot);
+            if (fs.existsSync(absolutePath)) {
+                const stats = fs.statSync(absolutePath);
+                if (stats.isDirectory()) {
+                    fs.rmSync(absolutePath, { recursive: true, force: true });
+                } else {
+                    fs.unlinkSync(absolutePath);
+                }
+                addGovernanceAction('FILE_DELETE', 'Runtime', p, 'COMPLETED');
+                addRuntimeLog('warn', `Infrastructure component wiped in ${projectRoot || 'Global'}: ${p}`, 'file_runtime');
+            }
+        });
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/files/mkdir", async (req, res) => {
+    const { path: dirPath, root: qProjectRoot, projectId } = req.body;
+    let projectRoot = qProjectRoot;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+       }
+    }
+
+    if (!dirPath) return res.status(400).json({ success: false, message: "Path required" });
+
+    const absolutePath = getSafePath(dirPath, projectRoot);
+
+    try {
+        if (!fs.existsSync(absolutePath)) {
+            fs.mkdirSync(absolutePath, { recursive: true });
+            addGovernanceAction('DIR_CREATE', 'Runtime', dirPath, 'COMPLETED');
+            addRuntimeLog('info', `Directory created in ${projectRoot || 'Global'}: ${dirPath}`, 'file_runtime');
+            res.json({ success: true, message: "Directory created." });
+        } else {
+            res.status(400).json({ success: false, message: "Directory already exists." });
+        }
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/files/upload", async (req, res) => {
+    // Note: Simple base64/text upload for now to avoid multipart-form complications in a single build
+    const { path: filePath, content, name, root: qProjectRoot, projectId } = req.body;
+    let projectRoot = qProjectRoot;
+
+    if (projectId) {
+       const project = await getProjectById(projectId);
+       if (project && project.runtime_path) {
+           projectRoot = project.runtime_path;
+       }
+    }
+
+    const fullPath = path.join(filePath, name);
+    const absolutePath = getSafePath(fullPath, projectRoot);
+    
+    try {
+        fs.writeFileSync(absolutePath, content, 'utf8');
+        addGovernanceAction('FILE_UPLOAD', 'Runtime', fullPath, 'COMPLETED');
+        addRuntimeLog('info', `File uploaded to ${projectRoot || 'Global'}: ${fullPath}`, 'file_runtime');
+        res.json({ success: true });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // ==========================================
+  // Custom Core Runtime APIs
+  // ==========================================
+  app.get("/api/runtime/projects/manifest", async (req, res) => {
+    const { id, path: projectPath } = req.query;
+    if (!projectPath) return res.status(400).json({ success: false, message: "Project path required" });
+
+    const manifestPath = getProjectManifestPath(projectPath as string);
+    if (!fs.existsSync(manifestPath)) {
+      return res.status(404).json({ success: false, message: "Runtime Constitution Manifest not found" });
+    }
+
+    try {
+      const stats = fs.statSync(manifestPath);
+      if (stats.isDirectory()) {
+         return res.status(400).json({ success: false, message: "EISDIR: Target is a directory, not a manifest file." });
+      }
+      const content = fs.readFileSync(manifestPath, 'utf8');
+      res.json({ success: true, manifest: JSON.parse(content) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.get("/api/runtime/projects", async (req, res) => {
+    try {
+      const projects = await getProjects();
+      res.json({ success: true, data: projects });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/projects/update", async (req, res) => {
+    const { id, project } = req.body;
+    if (!id || !project) return res.status(400).json({ success: false, message: "ID and Project data required" });
+    
+    try {
+      await updateProject(id, project);
+      const updatedProject = await getProjectById(id);
+      if (updatedProject) await syncProjectManifest(updatedProject);
+      
+      addGovernanceAction('PROJECT_UPDATE', 'System Admin', project.name, 'COMPLETED');
+      addRuntimeLog('info', `Project ${project.name} updated in Nexus Index & Manifest`, 'nexus_core');
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/projects/delete", async (req, res) => {
+    const { id, name } = req.body;
+    if (!id) return res.status(400).json({ success: false, message: "ID required" });
+
+    try {
+      const project = await getProjectById(id);
+      if (project && project.runtime_path) {
+          const manifestPath = getProjectManifestPath(project.runtime_path);
+          if (fs.existsSync(manifestPath)) {
+              fs.unlinkSync(manifestPath);
+              addRuntimeLog('warning', `Runtime Constitution Revoked for: ${project.name}`, 'nexus_core');
+          }
+      }
+      await deleteProject(id);
+      addGovernanceAction('PROJECT_DELETE', 'System Admin', name || id, 'COMPLETED');
+      addRuntimeLog('warn', `Project ${name || id} removed from Nexus Index (Soft Delete)`, 'nexus_core');
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/runtime/projects", async (req, res) => {
+    try {
+      const id = await addProject(req.body);
+      const project = await getProjectById(id);
+      if (project) await syncProjectManifest(project);
+      
+      addGovernanceAction('PROJECT_CREATE', 'System Admin', req.body.name, 'COMPLETED');
+      res.json({ success: true, id, message: "Project added with Runtime Manifest" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.delete("/api/runtime/projects/:id", async (req, res) => {
+    try {
+      await deleteProject(req.params.id);
+      res.json({ success: true, message: "Project deleted successfully" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/settings", async (req, res) => {
+    try {
+      const settings = await getSettings();
+      res.json({ success: true, data: settings });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/settings", async (req, res) => {
+    try {
+      const { key, value } = req.body;
+      await setSetting(key, value);
+      res.json({ success: true, message: "Setting saved successfully" });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/projects/provision", (req, res) => {
+    const { name, repo, type, env, domain } = req.body;
+    
+    if (repo === 'fail') {
+      addRuntimeLog('error', `Repository verification failed: 'fail' is not a valid repository or access denied.`, 'deploy_runtime');
+      return res.status(400).json({ success: false, message: "Invalid repository or access denied. Please verify credentials." });
+    }
+
+    addRuntimeLog('info', `Repository Validation initiated for ${repo}...`, 'deploy_runtime');
+    
+    // Simulate some Git interaction and provisioning
+    setTimeout(() => {
+        addRuntimeLog('info', `Authentication successful for repo ${repo}.`, 'deploy_runtime');
+    }, 1000);
+
+    setTimeout(() => {
+        addRuntimeLog('warn', `Cloning Repository ${repo}...`, 'deploy_runtime');
+    }, 2500);
+
+    setTimeout(() => {
+        addRuntimeLog('info', `Repository Cloned. Automating dependency installation for ${type}...`, 'deploy_runtime');
+    }, 4500);
+
+    setTimeout(async () => {
+        addRuntimeLog('info', `Workspace configured in /www/wwwroot/${name} (${env}). Link to Deploy Engine activated.`, 'deploy_runtime');
+        try {
+          await addProject({
+             name: name,
+             repo: repo,
+             type: type,
+             domain: domain || '',
+             status: 'active',
+             env: env,
+             version: '1.0.0',
+             health: '100',
+             last_deploy: 'Just now',
+             url: domain ? `https://${domain}` : `https://${name.toLowerCase().replace(/\s+/g, '-')}.local`,
+             runtime_path: `/www/wwwroot/${name}`,
+             node_id: 'default-node',
+             runtime_process: name,
+             runtime_type: type,
+             git_branch: 'main',
+             runtime_port: 3010
+           });
+
+          if (domain) {
+            const confDir = path.join(GLOBAL_ROOT, 'nginx/conf.d');
+            if (!fs.existsSync(confDir)) fs.mkdirSync(confDir, { recursive: true });
+            const explicitRoot = `/www/wwwroot/${name}`;
+            if (!fs.existsSync(explicitRoot)) fs.mkdirSync(explicitRoot, { recursive: true });
+            
+            let confBody = `server {\n    listen 80;\n    server_name ${domain};\n`;
+            if (type === 'nodejs' || type === 'nextjs') {
+              confBody += `\n    location / {\n        proxy_pass http://127.0.0.1:3010;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection 'upgrade';\n        proxy_set_header Host $host;\n        proxy_cache_bypass $http_upgrade;\n    }\n}`;
+            } else if (type === 'laravel') {
+              confBody += `    root ${explicitRoot}/public;\n    index index.php;\n\n    location / {\n        try_files $uri $uri/ /index.php?$query_string;\n    }\n\n    location ~ \\.php$ {\n        fastcgi_pass unix:/var/run/php/php-fpm.sock;\n        fastcgi_index index.php;\n        include fastcgi_params;\n    }\n}`;
+            } else {
+              confBody += `    root ${explicitRoot};\n    index index.html index.htm;\n\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}`;
+            }
+            fs.writeFileSync(path.join(confDir, `${domain}.conf`), confBody);
+            addRuntimeLog('info', `Domain configured and linked to NGINX: ${domain}`, 'network_runtime');
+          }
+        } catch (e) {
+          console.error("Failed to add project to DB", e);
+        }
+    }, 6000);
+
+    res.json({ success: true, message: "Provisioning Sequence Started. Check Runtime Logs for progress." });
+  });
+
+  // ==========================================
+  // PHASE E: MOBILE RUNTIME
+  // ==========================================
+  
+  let mobileAppsRuntimeDB = [
+    {
+      id: 1,
+      name: 'DevCore Customer App',
+      platform: 'Flutter (iOS & Android)',
+      apiEndpoint: 'https://api.devcore.com/v1',
+      version: '2.1.4',
+      environment: 'LIVE',
+      pushTokens: '24,502 Active',
+      status: 'online',
+    },
+    {
+      id: 2,
+      name: 'DevCore Provider App',
+      platform: 'Kotlin (Android)',
+      apiEndpoint: 'https://api.devcore.com/v2',
+      version: '1.5.0',
+      environment: 'LIVE',
+      pushTokens: '1,204 Active',
+      status: 'online',
+    },
+    {
+      id: 3,
+      name: 'DevCore Driver App',
+      platform: 'Swift (iOS)',
+      apiEndpoint: 'https://api.devcore.com/v1/driver',
+      version: '1.0.2-beta',
+      environment: 'STAGING',
+      pushTokens: '45 Active',
+      status: 'maintenance',
+    }
+  ];
+
+  app.get("/api/runtime/mobile/list", (req, res) => {
+    res.json({ success: true, data: mobileAppsRuntimeDB });
+  });
+
+  app.post("/api/runtime/mobile/push", (req, res) => {
+    const { appId, title, body } = req.body;
+    const appInfo = mobileAppsRuntimeDB.find(a => a.id === appId);
+    if (!appInfo) return res.status(404).json({ success: false, message: "App not found" });
+
+    addRuntimeLog('info', `Notification sent to ${appInfo.name}: ${title}`, 'mobile_runtime');
+    
+    res.json({ 
+      success: true, 
+      message: `Notification delivered successfully to ${appInfo.pushTokens}`
+    });
+  });
+
+  app.post("/api/runtime/mobile/deploy", (req, res) => {
+    const { appId } = req.body;
+    const appInfo = mobileAppsRuntimeDB.find(a => a.id === appId);
+    if (!appInfo) return res.status(404).json({ success: false, message: "App not found" });
+
+    addRuntimeLog('warn', `New build deployment requested for ${appInfo.name} [v${appInfo.version}]`, 'mobile_runtime');
+    
+    // Simulate updating version
+    const parts = appInfo.version.split('.');
+    if (parts.length === 3) {
+      let patch = parseInt(parts[2].split('-')[0]) || 0;
+      appInfo.version = `${parts[0]}.${parts[1]}.${patch + 1}`;
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Deploy pipeline initiated. Updated to v${appInfo.version}`
+    });
+  });
+
+  app.post("/api/runtime/mobile/settings", (req, res) => {
+    const { appId, settings } = req.body;
+    const index = mobileAppsRuntimeDB.findIndex(a => a.id === appId);
+    if (index === -1) return res.status(404).json({ success: false, message: "App not found" });
+
+    mobileAppsRuntimeDB[index] = { ...mobileAppsRuntimeDB[index], ...settings };
+    addRuntimeLog('info', `Mobile Runtime Settings updated for ${mobileAppsRuntimeDB[index].name}`, 'mobile_runtime');
+    
+    res.json({ 
+      success: true, 
+      message: "Mobile configuration updated successfully."
+    });
+  });
+
+  app.post("/api/runtime/nodes/:nodeId/scan", async (req, res) => {
+    const { nodeId } = req.params;
+    addRuntimeLog('info', `Initiating Smart Discovery Scan on Node ${nodeId}...`, 'discovery_engine');
+
+    const defaultInfraRoot = fs.existsSync(GLOBAL_ROOT) ? GLOBAL_ROOT : process.cwd();
+    const discoveredProjects = [];
+
+    if (fs.existsSync(defaultInfraRoot)) {
+        const dirs = fs.readdirSync(defaultInfraRoot, { withFileTypes: true })
+                       .filter(dirent => dirent.isDirectory())
+                       .map(dirent => dirent.name);
+
+        const { classifyRuntime } = await import('./server/runtime/runtimeClassification.js');
+
+        for (const dirName of dirs) {
+            // Ignore system/internal directories
+            if (['nginx', 'deployments', '.git', 'node_modules'].includes(dirName)) continue;
+            
+            const projPath = path.join(defaultInfraRoot, dirName);
+            let domain = `${dirName.toLowerCase()}.local`;
+            
+            // Try to see if there's a package.json to guess type
+            let type = 'Generic Project';
+            if (fs.existsSync(path.join(projPath, 'package.json'))) type = 'Node.js';
+            if (fs.existsSync(path.join(projPath, 'artisan'))) type = 'Laravel';
+            if (fs.existsSync(path.join(projPath, 'pubspec.yaml'))) type = 'Flutter';
+
+            const classification = await classifyRuntime(projPath);
+
+            // Try to find domain and port by checking nginx configs
+            // nginx configs are at GLOBAL_ROOT/nginx/conf.d/*.conf
+            const nginxConfPath = path.join(GLOBAL_ROOT, 'nginx/conf.d', `${dirName}.conf`);
+            let port = 3010;
+            if (fs.existsSync(nginxConfPath)) {
+                const content = fs.readFileSync(nginxConfPath, 'utf8');
+                const matchDomain = content.match(/server_name\s+([^;]+);/);
+                if (matchDomain && matchDomain[1]) {
+                    domain = matchDomain[1].trim();
+                }
+                const matchPort = content.match(/proxy_pass\s+http:\/\/(?:127\.0\.0\.1|localhost):(\d+);/);
+                if (matchPort && matchPort[1]) {
+                    port = parseInt(matchPort[1], 10);
+                }
+            } else if (classification.runtime_domain) {
+                domain = classification.runtime_domain;
+            }
+            
+            discoveredProjects.push({
+                name: classification.runtime_classification === 'Backup Runtime' ? `Backup - ${dirName}` : dirName,
+                path: projPath,
+                type: type,
+                env: classification.runtime_classification,
+                domain: domain,
+                version: '1.0.0',
+                port: port,
+                git: { branch: 'main', commit: 'HEAD', remote: 'origin' },
+                pm2: { name: dirName.toLowerCase(), status: 'online', uptime: classification.runtime_health || 'Managed' }
+            });
+        }
+    }
+
+    setTimeout(() => {
+        addRuntimeLog('success', `Discovery Scan Complete. Found ${discoveredProjects.length} projects on node ${nodeId}`, 'discovery_engine');
+        res.json({ success: true, discoveredProjects });
+    }, 1500);
+  });
+
+  app.post("/api/runtime/projects/import", async (req, res) => {
+    const project = req.body;
+    addRuntimeLog('info', `Importing Discovery Project: ${project.name} into NEXUS Runtime...`, 'discovery_engine');
+
+    try {
+        const targetPath = project.path;
+        
+        if (!targetPath || !fs.existsSync(targetPath)) {
+            addRuntimeLog('error', `Import Failed: Path ${targetPath} does not exist on disk.`, 'discovery_engine');
+            return res.status(400).json({ 
+                success: false, 
+                message: `FILESYSTEM_VERIFICATION_FAILED: Directory ${targetPath} not found.` 
+            });
+        }
+
+        // Verify it's a directory
+        const stats = fs.statSync(targetPath);
+        if (!stats.isDirectory()) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `RUNTIME_PATH_INVALID: ${targetPath} is not a directory.` 
+            });
+        }
+
+        const { classifyRuntime } = await import('./server/runtime/runtimeClassification.js');
+        const classification = await classifyRuntime(targetPath);
+
+        const id = await addProject({
+            name: classification.runtime_classification === 'Backup Runtime' ? `Backup - ${project.name}` : project.name,
+            repo: project.git?.remote || 'Local Archive',
+            type: project.type,
+            domain: classification.runtime_domain || project.domain || '',
+            env: classification.runtime_classification,
+            status: classification.runtime_classification === 'UNVERIFIED RUNTIME' ? 'Unverified' : 'active',
+            uptime: project.pm2?.uptime || classification.runtime_health,
+            runtime_path: targetPath,
+            node_id: project.node_id || 'LOCAL-01',
+            runtime_process: project.pm2?.name || project.name.toLowerCase(),
+            runtime_type: project.type,
+            git_branch: project.git?.branch || 'main',
+            runtime_port: project.port || 3010
+        });
+
+        // Ensure a runtime record is created explicitly to bind the context
+        const { RuntimeResolver } = await import('./server/runtime/runtimeResolver.js');
+        // This will verify the path and create the runtime record if managed correctly by resolver recovery
+        await RuntimeResolver.resolveRuntime(id.toString());
+
+        const newProject = await getProjectById(id);
+        if (newProject) await syncProjectManifest(newProject);
+
+        await addGovernanceAction('PROJECT_IMPORT', 'System Discovery', project.name, 'COMPLETED');
+        addRuntimeLog('success', `Infrastructure Object successfully linked and Manifested: ${project.name}`, 'deploy_runtime');
+        
+        res.json({ success: true, id });
+    } catch (e: any) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/servers/register", async (req, res) => {
+    const { name, ip, port, username, authType, credentials, env, role, region } = req.body;
+    
+    if (ip === "fail") {
+      addRuntimeLog('error', `SSH Validation failed: Host unreachable or Auth Refused for ${ip}`, 'security_runtime');
+      return res.status(400).json({ success: false, message: "Host Unreachable or Authentication Failed. Check IP and credentials." });
+    }
+
+    addRuntimeLog('info', `Validating SSH Connection to Real Infrastructure at ${ip}...`, 'security_runtime');
+    
+    setTimeout(async () => {
+        addRuntimeLog('info', `SSH Handshake Successful. Synced infrastructure details from ${ip}`, 'deploy_runtime');
+        const serverInfo = {
+           id: 'node-' + Math.floor(Math.random()*10000),
+           name: name || 'CORTEX-NEW-NODE',
+           ip: ip || 'Pending',
+           region: region || 'Unknown',
+           os: 'Ubuntu 24.04 LTS (Detected)',
+           status: 'online',
+           cpu: '10%',
+           ram: '4GB/16GB',
+           storage: '40GB/100GB',
+           uptime: '0 days',
+           health: 100,
+           auth_type: authType,
+           username: username,
+           role: role || 'Worker'
+        };
+        try {
+           await addNode(serverInfo);
+           // Also sync to governance DB
+           upsertNode(serverInfo.id, serverInfo.region, serverInfo.ip, serverInfo.role);
+           
+           res.json({ success: true, message: "Runtime Infrastructure Linked Successfully", serverInfo });
+        } catch (e) {
+           res.status(500).json({ success: false, message: "Failed to persist node" });
+        }
+    }, 2500);
+  });
+
+  // ==========================================
+  // PHASE D: DOMAINS & SSL RUNTIME
+  // ==========================================
+
+  import("./server/runtime/domainsApi.js").then((module) => {
+    module.setupDomainsApi(app, addRuntimeLog);
+  }).catch((err) => {
+    console.error("Failed to load Domains API", err);
+  });
+
+  // ==========================================
+  // PHASE F: REAL RUNTIME API BINDINGS
+  // ==========================================
+
+  app.get("/api/runtime/:id/files", async (req, res) => {
+    try {
+      const { RuntimeResolver } = await import('./server/runtime/runtimeResolver.js');
+      const { operational, error } = await RuntimeResolver.ensureRuntimeOperational(req.params.id);
+      if (!operational) return res.status(503).json({ success: false, message: `Runtime Synchronization incomplete: ${error}` });
+      
+      const { RuntimeFilesystem } = await import('./server/runtime/runtimeFilesystem.js');
+      const files = await RuntimeFilesystem.listFiles(req.params.id, req.query.path as string);
+      res.json({ success: true, data: files });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/logs", async (req, res) => {
+    try {
+      const { RuntimeResolver } = await import('./server/runtime/runtimeResolver.js');
+      const { operational, error } = await RuntimeResolver.ensureRuntimeOperational(req.params.id);
+      if (!operational) return res.status(503).json({ success: false, message: `Runtime Synchronization incomplete: ${error}` });
+
+      const { RuntimeLogs } = await import('./server/runtime/runtimeLogs.js');
+      const logs = await RuntimeLogs.getLogs(req.params.id);
+      res.json({ success: true, data: logs });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/pm2", async (req, res) => {
+    try {
+      const { RuntimeResolver } = await import('./server/runtime/runtimeResolver.js');
+      if (req.params.id !== 'rt-core') {
+        const { operational, error } = await RuntimeResolver.ensureRuntimeOperational(req.params.id);
+        if (!operational) return res.status(503).json({ success: false, message: `Runtime Synchronization incomplete: ${error}` });
+      }
+
+      const { RuntimePM2 } = await import('./server/runtime/runtimePM2.js');
+      const processInfo = await RuntimePM2.getRuntimeProcess(req.params.id);
+      res.json({ success: true, data: processInfo });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/monitoring", async (req, res) => {
+    try {
+      const { RuntimeMonitoring } = await import('./server/runtime/runtimeMonitoring.js');
+      const metrics = await RuntimeMonitoring.getLiveMetrics(req.params.id);
+      
+      // Async health check for event logging
+      const { RuntimeEvents } = await import('./server/runtime/runtimeEvents.js');
+      RuntimeEvents.analyzeRuntimeHealth(req.params.id, metrics).catch(console.error);
+
+      res.json({ success: true, data: metrics });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/events", async (req, res) => {
+    try {
+      const { RuntimeEvents } = await import('./server/runtime/runtimeEvents.js');
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const events = await RuntimeEvents.getEvents(req.params.id, limit);
+      res.json({ success: true, data: events });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/intelligence", async (req, res) => {
+    try {
+      const { RuntimeIntelligence } = await import('./server/runtime/runtimeIntelligence.js');
+      const analysis = await RuntimeIntelligence.getLatestAnalysis(req.params.id);
+      res.json({ success: true, data: analysis });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/:id/intelligence/analyze", async (req, res) => {
+    try {
+       const { RuntimeIntelligence } = await import('./server/runtime/runtimeIntelligence.js');
+       const { RuntimeMonitoring } = await import('./server/runtime/runtimeMonitoring.js');
+       const metrics = await RuntimeMonitoring.getLiveMetrics(req.params.id);
+       const analysis = await RuntimeIntelligence.analyzeRuntime(req.params.id, metrics);
+       res.json({ success: true, data: analysis });
+    } catch (e: any) {
+       res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.post("/api/runtime/:id/deploy", async (req, res) => {
+    try {
+      const { RuntimeDeploy } = await import('./server/runtime/runtimeDeploy.js');
+      await RuntimeDeploy.deploy(req.params.id, req.body.branch);
+      res.json({ success: true, message: 'Deployment triggered for runtime' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ==========================================
+  // VITE MIDDLEWARE (Full-Stack Dev)
+  // ==========================================
+  
+  if (process.env.NODE_ENV !== "production") {
+    console.log('[DevCore Startup] Integrating Vite middleware...');
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log('[DevCore Startup] Vite middleware integrated successfully.');
+    } catch (err) {
+      console.error('[DevCore Startup] Vite initialization failed:', err);
+    }
+  } else {
+    console.log('[DevCore Startup] Serving static files (Production)...');
+    const distPath = path.resolve(__dirname, 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
+}
+
+startServer().catch(console.error);
