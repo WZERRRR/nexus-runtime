@@ -268,8 +268,8 @@ export function DatabasesCenter() {
  />
  </div>
 
- <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
- <div className="glass-panel p-6 md:p-8 rounded-3xl lg:col-span-2 relative overflow-hidden group">
+ <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+ <div className="glass-panel p-5 md:p-6 rounded-xl lg:col-span-2 relative overflow-hidden group">
  <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/5 blur-[100px] rounded-full pointer-events-none"></div>
  <div className="flex justify-between items-center mb-8">
  <div className="flex items-center gap-4">
@@ -307,8 +307,8 @@ export function DatabasesCenter() {
  </div>
  </div>
 
- <div className="glass-panel rounded-3xl flex flex-col relative overflow-hidden group">
- <div className="p-6 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between">
+ <div className="glass-panel rounded-xl flex flex-col relative overflow-hidden group">
+ <div className="p-5 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between">
  <div className="flex items-center gap-3">
  <LayoutList className="w-4 h-4 text-slate-600 dark:text-slate-400" />
  <h3 className="font-black text-white text-[11px] uppercase tracking-[0.2em]">أكبر الجداول (Data Map)</h3>
@@ -500,10 +500,10 @@ export function DatabasesCenter() {
  initial={{ opacity: 0, x: 20 }}
  animate={{ opacity: 1, x: 0 }}
  exit={{ opacity: 0, x: -20 }}
- className="glass-panel rounded-3xl relative overflow-hidden "
+ className="glass-panel rounded-xl relative overflow-hidden "
  >
  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-100 dark:from-red-500/0 via-slate-100 dark:via-red-500/20 to-slate-100 dark:to-red-500/0"></div>
- <div className="p-8 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/80 pr-10">
+ <div className="p-5 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/80 pr-6">
  <div className="flex items-center gap-5">
  <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/10">
  <Clock className="w-6 h-6 text-red-500" />
@@ -516,7 +516,7 @@ export function DatabasesCenter() {
  </div>
  <div className="divide-y divide-slate-200 dark:divide-white/5">
  {currentDb.slowQueries > 0 ? (
- <div className="p-8 flex flex-col gap-6 group/entry transition-all hover:bg-red-500/[0.02]">
+ <div className="p-5 flex flex-col gap-4 group/entry transition-all hover:bg-red-500/[0.02]">
  <div className="flex items-center justify-between">
  <div className="flex items-center gap-4">
  <span className="text-[10px] font-black text-red-500 bg-red-400/10 px-4 py-2 rounded-2xl border border-red-500/20 shadow-lg uppercase tracking-[0.2em]">Execution Time: 4.2s</span>
@@ -524,7 +524,7 @@ export function DatabasesCenter() {
  </div>
  <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest group-hover/entry:text-slate-600 dark:text-slate-400 transition-colors">منذ ساعتين (2h ago)</span>
  </div>
- <div className="bg-slate-50 dark:bg-slate-950 p-8 rounded-3xl border border-slate-200 dark:border-white/5 font-mono text-sm text-blue-400/90 whitespace-pre-wrap leading-relaxed shadow-3xl">
+ <div className="bg-slate-50 dark:bg-slate-950 p-5 rounded-xl border border-slate-200 dark:border-white/5 font-mono text-sm text-blue-400/90 whitespace-pre-wrap leading-relaxed shadow-3xl">
  <span className="text-slate-700 mr-2">QUERY_RAW:</span> 
  SELECT COUNT(*) FROM notifications n \nJOIN users u ON n.user_id = u.id \nWHERE n.read_at IS NULL AND u.status = 'active';
  </div>

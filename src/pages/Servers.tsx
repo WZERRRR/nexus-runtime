@@ -558,9 +558,9 @@ export function Servers() {
                 <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-[11px] font-bold text-[var(--text-tertiary)]">
                   الاكتشاف لا يعني الاستيراد. لا يتم إنشاء Runtime إلا بعد موافقة يدوية.
                 </div>
-                <div className="max-h-full space-y-3 overflow-y-auto p-3">
+                <div className="max-h-full space-y-2 overflow-y-auto p-2.5">
                   {visibleWorkspace.length === 0 ? (
-                    <div className="p-8 text-center text-xs font-bold text-[var(--text-tertiary)]">
+                    <div className="p-6 text-center text-xs font-bold text-[var(--text-tertiary)]">
                       لا توجد مشاريع مكتشفة قابلة للعرض حاليًا.
                     </div>
                   ) : visibleWorkspace.map((candidate) => (
@@ -649,7 +649,7 @@ function RuntimePanel({ title, empty, children }: { title: string; empty: string
     <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
       <PanelHeader icon={<ShieldCheck />} title={title} />
       <div className="max-h-64 overflow-y-auto p-2">
-        {list.length > 0 ? list : <div className="p-6 text-center text-xs font-bold text-[var(--text-tertiary)]">{empty}</div>}
+        {list.length > 0 ? list : <div className="p-5 text-center text-xs font-bold text-[var(--text-tertiary)]">{empty}</div>}
       </div>
     </section>
   );

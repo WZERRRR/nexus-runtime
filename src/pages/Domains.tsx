@@ -278,20 +278,20 @@ export function DomainsCenter() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setModalType('add')}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-black transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-blue-600/20 active:scale-95"
           >
             Add site
           </button>
           <button
             onClick={() => showNotif("Advanced Setup سيتم ربطه ضمن Governance Policies قريبًا", "alert")}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
           >
             Advanced Setup
             <ChevronDown className="w-4 h-4 opacity-50" />
           </button>
           <button
             onClick={() => showNotif("Statistics قيد التفعيل التشغيلي", "alert")}
-            className="px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
+            className="px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
           >
             Statistics
           </button>
@@ -568,7 +568,7 @@ export function DomainsCenter() {
                initial={{ opacity: 0, scale: 0.9, y: 20 }}
                animate={{ opacity: 1, scale: 1, y: 0 }}
                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-               className="w-full max-w-lg bg-[#1a1a1a] border border-slate-200 dark:border-white/10 rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+               className="w-full max-w-lg bg-[#1a1a1a] border border-slate-200 dark:border-white/10 rounded-xl p-5 shadow-2xl overflow-hidden"
              >
                 <div className="flex items-center justify-between mb-8">
                    <div className="flex items-center gap-4">
@@ -711,8 +711,8 @@ export function DomainsCenter() {
                    </div>
                 </div>
 
-                <div className="flex-1 p-8 overflow-hidden">
-                   <div className="h-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-3xl p-6 font-mono text-[12px] text-slate-600 dark:text-slate-400 overflow-y-auto no-scrollbar selection:bg-blue-500/20">
+                <div className="flex-1 p-5 overflow-hidden">
+                   <div className="h-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl p-4 font-mono text-[12px] text-slate-600 dark:text-slate-400 overflow-y-auto no-scrollbar selection:bg-blue-500/20">
                       {modalType === 'conf' ? (
                         <textarea 
                            className="w-full h-full bg-transparent border-none outline-none resize-none font-mono text-sm leading-relaxed text-slate-700 dark:text-slate-300"
