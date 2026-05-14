@@ -24,78 +24,10 @@ interface SiteData {
   phpVersion: string | 'Static';
   expiration: string;
   sslDays: number | null;
-  requests: number;
+  requests: number | null;
   waf: boolean;
   history: { value: number }[];
 }
-
-const DOMAINS_DATA: SiteData[] = [
-  { 
-    id: 1, 
-    name: 'dev.linkpro-sa.com', 
-    remark: 'dev.linkpro-sa.com',
-    status: 'running',
-    backupCount: 0,
-    phpVersion: '8.3',
-    expiration: 'Perpetual',
-    sslDays: 68,
-    requests: 37450,
-    waf: true,
-    history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
-  },
-  { 
-    id: 2, 
-    name: 'linkpro-sa.com', 
-    remark: 'الإنتاج',
-    status: 'running',
-    backupCount: 0,
-    phpVersion: 'Static',
-    expiration: 'Perpetual',
-    sslDays: 65,
-    requests: 8316,
-    waf: true,
-    history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
-  },
-  { 
-    id: 3, 
-    name: 'site.tcore.site', 
-    remark: 'site_tcore_site',
-    status: 'running',
-    backupCount: 0,
-    phpVersion: 'Static',
-    expiration: 'Perpetual',
-    sslDays: 65,
-    requests: 3353,
-    waf: true,
-    history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
-  },
-  { 
-    id: 4, 
-    name: 'tcore.site', 
-    remark: 'tcore_site',
-    status: 'running',
-    backupCount: 0,
-    phpVersion: 'Static',
-    expiration: 'Perpetual',
-    sslDays: 60,
-    requests: 23923,
-    waf: true,
-    history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
-  },
-  { 
-    id: 5, 
-    name: '187.124.190.79', 
-    remark: 'smart-programmer',
-    status: 'running',
-    backupCount: 0,
-    phpVersion: 'Static',
-    expiration: 'Perpetual',
-    sslDays: null,
-    requests: 4166,
-    waf: true,
-    history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
-  },
-];
 
 const Sparkline = ({ data }: { data: any[] }) => (
   <div className="w-24 h-8">
@@ -206,7 +138,7 @@ export function DomainsCenter() {
   }
 
   const showNotif = (text: string, type: 'success' | 'alert' = 'success') => {
-    const id = Date.now() + Math.random().toString();
+    const id = `${Date.now()}`;
     setNotif({ id, text, type });
     setTimeout(() => setNotif(prev => prev?.id === id ? null : prev), 3000);
   };
@@ -505,8 +437,8 @@ export function DomainsCenter() {
                 </td>
                 <td className="px-4 py-4">
                    <div className="flex flex-col items-center">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{site.requests.toLocaleString()}</span>
-                      <Sparkline data={site.history} />
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{site.requests != null ? site.requests.toLocaleString() : '-'}</span>
+                      {Array.isArray(site.history) && site.history.length > 0 ? <Sparkline data={site.history} /> : <span className="text-[10px] text-slate-500">لا توجد بيانات تشغيلية حالياً</span>}
                    </div>
                 </td>
                 <td className="px-4 py-4 text-center">
@@ -777,14 +709,7 @@ export function DomainsCenter() {
                            spellCheck={false}
                         />
                       ) : (
-                        <div className="space-y-2">
-                           <div className="flex gap-4"><span className="text-blue-500">[17:25:31]</span> 142.112.5.22 <span className="text-emerald-500">GET / HTTP/1.1</span> 200 OK</div>
-                           <div className="flex gap-4"><span className="text-blue-500">[17:25:35]</span> 88.24.122.1 <span className="text-emerald-500">GET /assets/main.css</span> 200 OK</div>
-                           <div className="flex gap-4"><span className="text-blue-500">[17:26:01]</span> 104.18.2.1 <span className="text-emerald-500">POST /api/v1/auth</span> 201 CREATED</div>
-                           <div className="flex gap-4"><span className="text-blue-500">[17:26:12]</span> 5.12.1.22 <span className="text-amber-500">GET /forbidden-dir/</span> 403 FORBIDDEN</div>
-                           <div className="flex gap-4"><span className="text-blue-500">[17:27:01]</span> 142.112.5.22 <span className="text-emerald-500">GET /contact</span> 200 OK</div>
-                           <div className="animate-pulse flex gap-2"><span className="text-slate-700">_ waiting for events...</span></div>
-                        </div>
+                        <p className="text-slate-500 text-xs">لا توجد بيانات تشغيلية حالياً</p>
                       )}
                    </div>
                 </div>

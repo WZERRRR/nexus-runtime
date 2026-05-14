@@ -96,7 +96,7 @@ export function Projects() {
   }, []);
 
  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-   const id = Date.now() + Math.random().toString();
+   const id = `${Date.now()}`;
    setToast({ id, message, type });
    setTimeout(() => setToast(prev => prev?.id === id ? null : prev), 3000);
  };
