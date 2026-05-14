@@ -329,7 +329,19 @@ type PendingApprovalExecution =
       projectId?: string | number;
       requestedBy: string;
     };
-const pendingApprovalExecutions = new Map<string, PendingApprovalExecution>();
+try {
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_pending_mutations (
+      approval_id TEXT PRIMARY KEY,
+      runtime_id TEXT NOT NULL,
+      mutation_id TEXT NOT NULL,
+      mutation_kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      requested_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+} catch {}
 
 function beginGovernedMutation(mutationId: string) {
   const existing = mutationCache.get(mutationId);
@@ -355,6 +367,41 @@ function completeGovernedMutation(mutationId: string, response: any) {
 
 function failGovernedMutation(mutationId: string) {
   mutationCache.delete(mutationId);
+}
+
+function persistPendingMutation(entry: PendingApprovalExecution) {
+  const payload = JSON.stringify(entry);
+  sqliteDb.prepare(`
+    INSERT INTO runtime_pending_mutations (approval_id, runtime_id, mutation_id, mutation_kind, payload_json, requested_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(approval_id) DO UPDATE SET
+      runtime_id = excluded.runtime_id,
+      mutation_id = excluded.mutation_id,
+      mutation_kind = excluded.mutation_kind,
+      payload_json = excluded.payload_json,
+      requested_by = excluded.requested_by
+  `).run(
+    entry.approvalId,
+    entry.runtimeId,
+    entry.mutationId,
+    entry.kind,
+    payload,
+    entry.requestedBy
+  );
+}
+
+function getPendingMutationByApprovalId(approvalId: string): PendingApprovalExecution | null {
+  const row = sqliteDb.prepare('SELECT payload_json FROM runtime_pending_mutations WHERE approval_id = ?').get(approvalId) as any;
+  if (!row?.payload_json) return null;
+  try {
+    return JSON.parse(String(row.payload_json)) as PendingApprovalExecution;
+  } catch {
+    return null;
+  }
+}
+
+function deletePendingMutation(approvalId: string) {
+  sqliteDb.prepare('DELETE FROM runtime_pending_mutations WHERE approval_id = ?').run(approvalId);
 }
 
 function execPromise(command: string, opts?: { cwd?: string; timeout?: number }) {
@@ -1585,10 +1632,10 @@ async function startServer() {
       await RuntimeApproval.updateApproval(req.params.approvalId, status, reviewed_by, reason);
       const normalizedStatus = String(status || '').toUpperCase();
       if (normalizedStatus === 'APPROVED') {
-        const pending = pendingApprovalExecutions.get(req.params.approvalId);
+        const pending = getPendingMutationByApprovalId(req.params.approvalId);
         if (pending) {
           const executionResult = await executeApprovedMutation(pending);
-          pendingApprovalExecutions.delete(req.params.approvalId);
+          deletePendingMutation(req.params.approvalId);
           addRuntimeLog(
             executionResult.success ? 'success' : 'error',
             executionResult.success
@@ -1600,7 +1647,7 @@ async function startServer() {
         }
       }
       if (normalizedStatus === 'REJECTED') {
-        pendingApprovalExecutions.delete(req.params.approvalId);
+        deletePendingMutation(req.params.approvalId);
       }
       res.json({ success: true, data: { orchestration: null } });
     } catch (e) {
@@ -1990,7 +2037,7 @@ async function startServer() {
         });
         addGovernanceAction('PM2_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
         addRuntimeLog('warning', `[mutation:${mutationId}] PM2 ${action} blocked pending approval ${requestedApprovalId}`, 'pm2_manager');
-        pendingApprovalExecutions.set(requestedApprovalId, {
+        persistPendingMutation({
           kind: 'pm2',
           approvalId: requestedApprovalId,
           runtimeId,
@@ -2017,8 +2064,8 @@ async function startServer() {
           failGovernedMutation(mutationId);
           return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
         }
-        pendingApprovalExecutions.delete(String(approvalId));
-     }
+        deletePendingMutation(String(approvalId));
+      }
 
      addRuntimeLog('warning', `[mutation:${mutationId}] PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
      exec(finalCommand, (error, stdout) => {
@@ -2133,7 +2180,7 @@ async function startServer() {
         approval_reason: `Terminal mutation requested for ${runtimeId}`,
       });
       addGovernanceAction('TERMINAL_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
-      pendingApprovalExecutions.set(requestedApprovalId, {
+      persistPendingMutation({
         kind: 'terminal',
         approvalId: requestedApprovalId,
         runtimeId,
@@ -2160,7 +2207,7 @@ async function startServer() {
         failGovernedMutation(mutationId);
         return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
       }
-      pendingApprovalExecutions.delete(String(approvalId));
+      deletePendingMutation(String(approvalId));
     }
 
     const executionContext = cwd ? path.resolve(cwd) : process.cwd();
