@@ -350,6 +350,16 @@ try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN payload_ha
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN execution_status TEXT DEFAULT 'PENDING'`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN last_result_json TEXT`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN executed_at DATETIME`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN replay_count INTEGER DEFAULT 0`); } catch {}
+
+function governanceError(res: any, status: number, message: string, errorCode: string, extra?: Record<string, any>) {
+  return res.status(status).json({ success: false, message, error_code: errorCode, ...(extra || {}) });
+}
+
+function canReplayByRole(role: string) {
+  const normalized = String(role || '').trim().toLowerCase();
+  return normalized === 'admin' || normalized === 'super admin' || normalized === 'super_admin';
+}
 
 function beginGovernedMutation(mutationId: string) {
   const existing = mutationCache.get(mutationId);
@@ -1705,26 +1715,44 @@ async function startServer() {
     try {
       const runtimeId = String(req.params.id);
       const approvalId = String(req.params.approvalId);
+      const replayReason = String(req.body?.reason || '').trim();
+      const replayedBy = String(req.body?.replayed_by || req.body?.reviewed_by || 'RuntimeOperator');
+      const maxReplayAttempts = 3;
+      if (!replayReason) {
+        return governanceError(res, 400, 'Replay reason is required', 'REPLAY_REASON_REQUIRED');
+      }
+      if (!canReplayByRole(replayedBy)) {
+        return governanceError(res, 403, 'Replay blocked: insufficient governance role', 'REPLAY_POLICY_GATE', {
+          violation_type: 'ReplayPolicyGate'
+        });
+      }
       const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
-      if (!approval) return res.status(404).json({ success: false, message: 'Approval not found for runtime' });
+      if (!approval) return governanceError(res, 404, 'Approval not found for runtime', 'APPROVAL_NOT_FOUND');
       if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
-        return res.status(403).json({ success: false, message: 'Replay blocked: approval is not APPROVED', violation_type: 'ApprovalGate' });
+        return governanceError(res, 403, 'Replay blocked: approval is not APPROVED', 'APPROVAL_GATE', { violation_type: 'ApprovalGate' });
+      }
+      const replayCount = Number(approval.replay_count || 0);
+      if (replayCount >= maxReplayAttempts) {
+        return governanceError(res, 409, `Replay limit reached (${maxReplayAttempts})`, 'REPLAY_LIMIT_REACHED', {
+          violation_type: 'ReplayPolicyGate'
+        });
       }
 
       const pendingRecord = getPendingMutationRecord(approvalId);
-      if (!pendingRecord) return res.status(404).json({ success: false, message: 'No mutation payload found for this approval' });
+      if (!pendingRecord) return governanceError(res, 404, 'No mutation payload found for this approval', 'MUTATION_PAYLOAD_NOT_FOUND');
       const pending = getPendingMutationByApprovalId(approvalId);
-      if (!pending) return res.status(422).json({ success: false, message: 'Payload integrity validation failed', violation_type: 'PayloadIntegrityGate' });
+      if (!pending) return governanceError(res, 422, 'Payload integrity validation failed', 'PAYLOAD_INTEGRITY_GATE', { violation_type: 'PayloadIntegrityGate' });
 
       const replayMutationId = `replay-${pending.mutationId}-${Date.now()}`;
       const replayPayload: PendingApprovalExecution = { ...pending, mutationId: replayMutationId };
       const replayResult = await executeApprovedMutation(replayPayload);
       updatePendingMutationExecution(approvalId, replayResult.success ? 'COMPLETED' : 'FAILED', replayResult);
+      sqliteDb.prepare('UPDATE runtime_approvals SET replay_count = COALESCE(replay_count, 0) + 1 WHERE id = ?').run(approvalId);
       addRuntimeLog(
         replayResult.success ? 'success' : 'error',
         replayResult.success
-          ? `Replay succeeded for approval ${approvalId} with mutation ${replayMutationId}`
-          : `Replay failed for approval ${approvalId} with mutation ${replayMutationId}`,
+          ? `Replay succeeded for approval ${approvalId} with mutation ${replayMutationId} by ${replayedBy}`
+          : `Replay failed for approval ${approvalId} with mutation ${replayMutationId} by ${replayedBy}`,
         'governance_runtime'
       );
       res.json({
@@ -1733,6 +1761,8 @@ async function startServer() {
           approvalId,
           previousMutationId: pending.mutationId,
           replayMutationId,
+          replayReason,
+          replayedBy,
           result: replayResult
         }
       });
@@ -2236,14 +2266,14 @@ async function startServer() {
     if (!finalCommand) return res.status(400).json({ success: false, message: "Command required." });
     const governanceCheck = await validateExecutionPolicy('TERMINAL_EXEC', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
-      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
     }
     
     const normalized = String(finalCommand || '').toLowerCase();
-    const forbidden = ['rm -rf /', 'mkfs', 'dd', 'reboot', 'shutdown', 'kill -9'];
+    const forbidden = ['rm -rf /', 'mkfs', 'dd', 'reboot', 'shutdown', 'kill -9', 'pm2 delete', 'del /f /q', 'format c:', 'takeown'];
     if (forbidden.some(f => normalized.includes(f))) {
       failGovernedMutation(mutationId);
-      return res.status(403).json({ success: false, message: "Command forbidden by Governance Protocol." });
+      return governanceError(res, 403, "Command forbidden by Governance Protocol.", 'COMMAND_POLICY_BLOCKED');
     }
     const requiresApproval = normalized.includes('pm2 delete') || normalized.includes('chmod') || ['high', 'critical'].includes(riskLevel);
     const precheck = {
@@ -2255,7 +2285,7 @@ async function startServer() {
     };
     if (!precheck.cwdExists) {
       failGovernedMutation(mutationId);
-      return res.status(422).json({ success: false, message: 'Pre-check failed: execution directory unavailable', data: { mutationId, precheck } });
+      return governanceError(res, 422, 'Pre-check failed: execution directory unavailable', 'PRECHECK_FAILED', { data: { mutationId, precheck } });
     }
     if (requiresApproval && !approvalId) {
       const requestedApprovalId = await RuntimeApproval.requestApproval({
@@ -2287,11 +2317,11 @@ async function startServer() {
       const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
       if (!approval) {
         failGovernedMutation(mutationId);
-        return res.status(403).json({ success: false, message: 'Approval record not found for runtime', violation_type: 'ApprovalGate' });
+        return governanceError(res, 403, 'Approval record not found for runtime', 'APPROVAL_NOT_FOUND', { violation_type: 'ApprovalGate' });
       }
       if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
         failGovernedMutation(mutationId);
-        return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
+        return governanceError(res, 403, `Approval ${approvalId} is not approved`, 'APPROVAL_GATE', { violation_type: 'ApprovalGate' });
       }
       updatePendingMutationExecution(String(approvalId), 'COMPLETED', { success: true, source: 'direct_approved_execution' });
     }
@@ -2591,7 +2621,7 @@ async function startServer() {
     if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
     const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
-      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
     }
     const absolutePath = getSafePath(filePath);
     try {
@@ -2606,7 +2636,7 @@ async function startServer() {
         const precheck = { mutationId, absolutePath, exists: fs.existsSync(path.dirname(absolutePath)) };
         if (!precheck.exists) {
           failGovernedMutation(mutationId);
-          return res.status(422).json({ success: false, message: 'Pre-check failed: parent directory unavailable', data: { mutationId, precheck } });
+          return governanceError(res, 422, 'Pre-check failed: parent directory unavailable', 'PRECHECK_FAILED', { data: { mutationId, precheck } });
         }
         fs.writeFileSync(absolutePath, content, 'utf8');
         addGovernanceAction('FILESYSTEM_WRITE', 'Runtime', filePath, 'COMPLETED');
@@ -2623,7 +2653,7 @@ async function startServer() {
     if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths required" });
     const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
-      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
     }
     try {
         const mutationId = qMutationId ? String(qMutationId) : `mut-fs-delete-global-${Date.now()}`;
@@ -2869,7 +2899,7 @@ async function startServer() {
     if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
     const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
-      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
     }
 
     const absolutePath = getSafePath(filePath, projectRoot);
@@ -2886,12 +2916,12 @@ async function startServer() {
         const precheck = { mutationId, runtimeId: String(projectId || 'runtime'), parentExists: fs.existsSync(path.dirname(absolutePath)) };
         if (!precheck.parentExists) {
             failGovernedMutation(mutationId);
-            return res.status(422).json({ success: false, message: 'Pre-check failed: parent directory unavailable', data: { mutationId, precheck } });
+            return governanceError(res, 422, 'Pre-check failed: parent directory unavailable', 'PRECHECK_FAILED', { data: { mutationId, precheck } });
         }
         if (isSensitiveRuntimeFile(absolutePath)) {
             auditSensitiveFileAccess('SENSITIVE_FILE_WRITE', filePath, 'BLOCKED');
             failGovernedMutation(mutationId);
-            return res.status(403).json({ success: false, message: "Sensitive file write is blocked by governance." });
+            return governanceError(res, 403, "Sensitive file write is blocked by governance.", 'SENSITIVE_FILE_GOVERNANCE_BLOCK');
         }
         fs.writeFileSync(absolutePath, content, 'utf8');
         addGovernanceAction('FILE_WRITE', 'Runtime', filePath, 'COMPLETED');
@@ -2918,7 +2948,7 @@ async function startServer() {
     if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths array required" });
     const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
-      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
     }
 
     try {
@@ -2935,7 +2965,7 @@ async function startServer() {
             if (isSensitiveRuntimeFile(absolutePath)) {
                 auditSensitiveFileAccess('SENSITIVE_FILE_DELETE', p, 'BLOCKED');
                 failGovernedMutation(mutationId);
-                return res.status(403).json({ success: false, message: "Sensitive file delete is blocked by governance." });
+                return governanceError(res, 403, "Sensitive file delete is blocked by governance.", 'SENSITIVE_FILE_GOVERNANCE_BLOCK');
             }
             if (fs.existsSync(absolutePath)) {
                 const stats = fs.statSync(absolutePath);

@@ -57,6 +57,7 @@ export function ProjectWorkspace() {
   const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
   const [pendingMutations, setPendingMutations] = useState<any[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [operationNotice, setOperationNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -234,18 +235,37 @@ export function ProjectWorkspace() {
     if (!project) return;
     const runtimeId = String(project?.runtime_id || project?.id || '');
     try {
-      await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'RuntimeOperator', `Decision from workspace: ${status}`);
+      const result = await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'RuntimeOperator', `Decision from workspace: ${status}`);
+      if (!result?.success) {
+        setOperationNotice({ type: 'error', message: result?.message || 'فشل تحديث الموافقة التشغيلية' });
+        return;
+      }
+      setOperationNotice({ type: 'success', message: status === 'APPROVED' ? 'تمت الموافقة وتنفيذ العملية' : 'تم رفض العملية التشغيلية' });
       await loadOperationalData(project);
-    } catch {}
+    } catch {
+      setOperationNotice({ type: 'error', message: 'تعذر تحديث حالة الموافقة' });
+    }
   };
 
   const handleReplayMutation = async (approvalId: string) => {
     if (!project) return;
     const runtimeId = String(project?.runtime_id || project?.id || '');
     try {
-      await runtimeAPI.replayApprovedMutation(runtimeId, approvalId);
+      const result = await runtimeAPI.replayApprovedMutation(runtimeId, approvalId, 'Runtime replay requested from workspace', 'Admin');
+      if (!result?.success) {
+        const code = String(result?.error_code || '');
+        if (code === 'REPLAY_LIMIT_REACHED') setOperationNotice({ type: 'error', message: 'تم الوصول للحد الأقصى لإعادة التنفيذ لهذه العملية' });
+        else if (code === 'REPLAY_POLICY_GATE') setOperationNotice({ type: 'error', message: 'إعادة التنفيذ محظورة بسبب صلاحيات الحوكمة' });
+        else if (code === 'PAYLOAD_INTEGRITY_GATE') setOperationNotice({ type: 'error', message: 'فشل تحقق سلامة الحمولة التشغيلية' });
+        else if (code === 'APPROVAL_GATE') setOperationNotice({ type: 'error', message: 'لا يمكن إعادة التنفيذ قبل اعتماد العملية' });
+        else setOperationNotice({ type: 'error', message: result?.message || 'فشل إعادة تنفيذ العملية' });
+        return;
+      }
+      setOperationNotice({ type: 'success', message: 'تمت إعادة تنفيذ العملية بنجاح' });
       await loadOperationalData(project);
-    } catch {}
+    } catch {
+      setOperationNotice({ type: 'error', message: 'تعذر تنفيذ طلب Replay' });
+    }
   };
 
   if (isLoading) {
@@ -291,6 +311,15 @@ export function ProjectWorkspace() {
           <MetricCard label="Git Branch" value={project.git_branch || 'N/A'} />
           <MetricCard label="Runtime Path" value={project.runtime_path || 'N/A'} mono />
         </div>
+        {operationNotice && (
+          <div className={`mt-3 rounded-lg border px-3 py-2 text-xs font-semibold ${
+            operationNotice.type === 'success'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              : 'border-red-500/30 bg-red-500/10 text-red-300'
+          }`}>
+            {operationNotice.message}
+          </div>
+        )}
       </div>
 
       <div className={`grid grid-cols-1 gap-3 ${leftCollapsed && rightCollapsed ? 'xl:grid-cols-1' : leftCollapsed || rightCollapsed ? 'xl:grid-cols-10' : 'xl:grid-cols-12'}`}>

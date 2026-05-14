@@ -992,9 +992,11 @@ class RuntimeAPI {
     return res.json();
   }
 
-  async replayApprovedMutation(runtimeId: string | number, approvalId: string): Promise<any> {
+  async replayApprovedMutation(runtimeId: string | number, approvalId: string, reason: string, replayedBy: string = 'Admin'): Promise<any> {
     const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}/replay`, {
-      method: 'POST'
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason, replayed_by: replayedBy })
     });
     return res.json();
   }
