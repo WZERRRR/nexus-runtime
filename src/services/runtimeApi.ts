@@ -745,6 +745,13 @@ class RuntimeAPI {
     });
     return res.json();
   }
+
+  async getProjectEnvironmentBindings(projectId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/projects/${encodeURIComponent(projectId.toString())}/environments`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch environment bindings');
+    return data.data || [];
+  }
 }
 
 export const runtimeAPI = new RuntimeAPI();

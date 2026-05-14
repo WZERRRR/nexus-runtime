@@ -2227,6 +2227,98 @@ async function startServer() {
     }
   });
 
+  app.get("/api/runtime/projects/:id/environments", async (req, res) => {
+    try {
+      const project = await getProjectById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+      let pm2Processes: any[] = [];
+      try {
+        const pm2Result = await execJson("pm2 jlist", 2500);
+        pm2Processes = pm2Result.stdout?.trim() ? JSON.parse(pm2Result.stdout) : [];
+      } catch {
+        pm2Processes = [];
+      }
+
+      const domains = discoverNginxDomains();
+      const runtimePath = project.runtime_path ? path.resolve(project.runtime_path) : "";
+      const runtimePort = Number(project.runtime_port || 0) || null;
+      const runtimeProcess = String(project.runtime_process || "").trim();
+      const projectName = String(project.name || "").toLowerCase();
+
+      const linkedDomains = domains
+        .filter((d: any) => {
+          const rootPath = d.rootPath ? path.resolve(String(d.rootPath)) : null;
+          const byPath = runtimePath && rootPath && rootPath === runtimePath;
+          const byPort = runtimePort && d.proxyPort && Number(d.proxyPort) === runtimePort;
+          const byName = projectName && String(d.name || "").toLowerCase().includes(projectName);
+          return Boolean(byPath || byPort || byName);
+        })
+        .map((d: any) => {
+          let sslEnabled = false;
+          try {
+            if (d.configPath && fs.existsSync(d.configPath)) {
+              const conf = fs.readFileSync(d.configPath, "utf8");
+              sslEnabled = /listen\s+443\s+ssl/i.test(conf);
+            }
+          } catch {
+            sslEnabled = false;
+          }
+          return {
+            domain: d.name,
+            nginxBinding: d.configPath || null,
+            sslState: sslEnabled ? "enabled" : "disabled",
+            proxyPort: d.proxyPort || null,
+          };
+        });
+
+      const linkedPm2 = pm2Processes.filter((proc: any) => {
+        const cwd = proc?.pm2_env?.pm_cwd || proc?.pm2_env?.cwd;
+        const procPort = Number(proc?.pm2_env?.PORT || proc?.pm2_env?.port || proc?.pm2_env?.env?.PORT || 0) || null;
+        const byPath = runtimePath && cwd && path.resolve(cwd) === runtimePath;
+        const byName = runtimeProcess && proc?.name === runtimeProcess;
+        const byPort = runtimePort && procPort && procPort === runtimePort;
+        return Boolean(byPath || byName || byPort);
+      });
+
+      const deriveEnvName = (domain: string | null) => {
+        const source = `${String(project.env || "")} ${String(project.git_branch || "")} ${String(domain || "")}`.toLowerCase();
+        if (source.includes("stag")) return "STAGING";
+        if (source.includes("dev")) return "DEV";
+        return "LIVE";
+      };
+
+      const environments = (linkedDomains.length > 0 ? linkedDomains : [{
+        domain: project.domain || null,
+        nginxBinding: null,
+        sslState: "unknown",
+        proxyPort: runtimePort,
+      }]).map((d: any, idx: number) => {
+        const pm2 = linkedPm2[idx] || linkedPm2[0] || null;
+        const pm2Name = pm2?.name || runtimeProcess || null;
+        const port = d.proxyPort || runtimePort || Number(pm2?.pm2_env?.PORT || pm2?.pm2_env?.port || 0) || null;
+        const validated = Boolean(d.domain && runtimePath && pm2Name && port && d.nginxBinding);
+        return {
+          id: `${req.params.id}-${idx}`,
+          name: deriveEnvName(d.domain),
+          realDomain: d.domain,
+          runtimePath: runtimePath || null,
+          pm2Process: pm2Name,
+          runtimePort: port,
+          nginxBinding: d.nginxBinding,
+          sslState: d.sslState,
+          pm2Status: pm2?.pm2_env?.status || "offline",
+          validated,
+          validationMessage: validated ? null : "البيئة غير مربوطة ببنية تشغيل فعلية",
+        };
+      });
+
+      res.json({ success: true, data: environments });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   app.post("/api/runtime/projects/update", async (req, res) => {
     const { id, project } = req.body;
     if (!id || !project) return res.status(400).json({ success: false, message: "ID and Project data required" });
