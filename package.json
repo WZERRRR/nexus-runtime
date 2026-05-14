@@ -32,7 +32,8 @@
     "systeminformation": "^5.31.6",
     "tailwind-merge": "^3.5.0",
     "uuid": "^14.0.0",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

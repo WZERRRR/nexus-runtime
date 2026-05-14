@@ -6,6 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import os from "os";
 import { exec } from "child_process";
+import { WebSocketServer, WebSocket } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1032,6 +1033,145 @@ async function startServer() {
     addGovernanceAction('NODE_ACTION', 'Runtime', `${nodeId}:${action}`, 'COMPLETED');
     addRuntimeLog('success', `Node Action ${action} for ${nodeId} execution confirmed.`, 'infrastructure_core');
     res.json({ success: true, message: `Node ${action} sequence completed.` });
+  });
+
+  type RuntimeStreamChannel = 'runtime' | 'pm2' | 'deploy' | 'governance' | 'errors';
+  type RuntimeStreamClient = {
+    ws: WebSocket;
+    runtimeId?: string;
+    projectId?: string;
+    channels: Set<RuntimeStreamChannel>;
+    paused: boolean;
+    filterLevel: string;
+    filterService: string;
+    search: string;
+    deliveredKeys: Set<string>;
+  };
+
+  const wsServer = new WebSocketServer({ server, path: "/ws/runtime/logs" });
+  const streamClients = new Set<RuntimeStreamClient>();
+
+  const normalizeRuntimeLog = (row: any, fallbackService = 'runtime') => ({
+    id: String(row?.id ?? `${row?.timestamp ?? Date.now()}`),
+    timestamp: row?.timestamp || new Date().toISOString(),
+    level: String(row?.type || row?.level || 'info').toLowerCase(),
+    service: String(row?.source || row?.service || fallbackService),
+    message: String(row?.message || ''),
+  });
+
+  const matchesChannel = (entry: any, channels: Set<RuntimeStreamChannel>) => {
+    if (channels.has('runtime')) return true;
+    const src = String(entry.service || '').toLowerCase();
+    const msg = String(entry.message || '').toLowerCase();
+    if (channels.has('pm2') && (src.includes('pm2') || msg.includes('pm2'))) return true;
+    if (channels.has('deploy') && (src.includes('deploy') || msg.includes('deploy'))) return true;
+    if (channels.has('governance') && (src.includes('governance') || src.includes('security') || msg.includes('governance'))) return true;
+    if (channels.has('errors') && entry.level === 'error') return true;
+    return false;
+  };
+
+  const filterStreamEntries = (entries: any[], client: RuntimeStreamClient) => {
+    const search = client.search.trim().toLowerCase();
+    return entries.filter((entry) => {
+      if (!matchesChannel(entry, client.channels)) return false;
+      if (client.filterLevel !== 'all' && entry.level !== client.filterLevel) return false;
+      if (client.filterService !== 'all' && entry.service !== client.filterService) return false;
+      if (search && !(`${entry.message} ${entry.service}`.toLowerCase().includes(search))) return false;
+      return true;
+    });
+  };
+
+  const getScopedRuntimeLogs = async (runtimeId?: string) => {
+    if (!runtimeId) return [];
+    try {
+      const { RuntimeLogs } = await import('./server/runtime/runtimeLogs.js');
+      const rows = await RuntimeLogs.getLogs(runtimeId);
+      return Array.isArray(rows) ? rows.map((row: any) => normalizeRuntimeLog(row, 'runtime_stream')) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const streamRuntimeLogs = async (client: RuntimeStreamClient) => {
+    if (client.paused || client.ws.readyState !== WebSocket.OPEN) return;
+
+    const audit = getRecentLogs(180).map((row: any) => normalizeRuntimeLog(row));
+    const scoped = await getScopedRuntimeLogs(client.runtimeId);
+    const merged = [...audit, ...scoped]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    const filtered = filterStreamEntries(merged, client);
+    const delta = filtered.filter((entry) => {
+      const key = `${entry.id}:${entry.timestamp}:${entry.service}`;
+      if (client.deliveredKeys.has(key)) return false;
+      client.deliveredKeys.add(key);
+      return true;
+    });
+
+    if (client.deliveredKeys.size > 4000) {
+      const lastKeys = Array.from(client.deliveredKeys).slice(-1500);
+      client.deliveredKeys = new Set(lastKeys);
+    }
+
+    if (delta.length > 0) {
+      client.ws.send(JSON.stringify({ type: 'logs', data: delta }));
+    }
+  };
+
+  wsServer.on("connection", (ws) => {
+    const client: RuntimeStreamClient = {
+      ws,
+      channels: new Set<RuntimeStreamChannel>(['runtime']),
+      paused: false,
+      filterLevel: 'all',
+      filterService: 'all',
+      search: '',
+      deliveredKeys: new Set<string>(),
+    };
+
+    streamClients.add(client);
+    ws.send(JSON.stringify({ type: 'ready', data: { channels: ['runtime', 'pm2', 'deploy', 'governance', 'errors'] } }));
+
+    ws.on("message", async (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === 'subscribe') {
+          client.runtimeId = msg.runtimeId ? String(msg.runtimeId) : undefined;
+          client.projectId = msg.projectId ? String(msg.projectId) : undefined;
+          client.channels = new Set<RuntimeStreamChannel>(Array.isArray(msg.channels) && msg.channels.length ? msg.channels : ['runtime']);
+          client.filterLevel = msg.filterLevel || 'all';
+          client.filterService = msg.filterService || 'all';
+          client.search = msg.search || '';
+          client.deliveredKeys.clear();
+          await streamRuntimeLogs(client);
+          return;
+        }
+        if (msg.type === 'pause') client.paused = true;
+        if (msg.type === 'resume') client.paused = false;
+        if (msg.type === 'filters') {
+          client.filterLevel = msg.filterLevel || 'all';
+          client.filterService = msg.filterService || 'all';
+          client.search = msg.search || '';
+        }
+      } catch {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid stream message format' }));
+      }
+    });
+
+    ws.on("close", () => {
+      streamClients.delete(client);
+    });
+  });
+
+  const streamTicker = setInterval(() => {
+    streamClients.forEach((client) => {
+      streamRuntimeLogs(client).catch(() => undefined);
+    });
+  }, 1000);
+
+  server.on("close", () => {
+    clearInterval(streamTicker);
+    wsServer.close();
   });
 
   app.delete("/api/runtime/nodes/:nodeId", async (req, res) => {
