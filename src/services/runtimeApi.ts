@@ -790,6 +790,31 @@ class RuntimeAPI {
     if (!data.success) throw new Error(data.message || 'Deploy failed');
     return data.data;
   }
+
+  async getRuntimeSnapshots(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/snapshots`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch runtime snapshots');
+    return data.data || [];
+  }
+
+  async getRuntimeRecoveries(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/recoveries`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch runtime recoveries');
+    return data.data || [];
+  }
+
+  async runRuntimeRollback(runtimeId: string | number, snapshotId: string): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snapshotId })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Rollback failed');
+    return data.data;
+  }
 }
 
 export const runtimeAPI = new RuntimeAPI();
