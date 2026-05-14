@@ -40,6 +40,8 @@ export function ProjectWorkspace() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [project, setProject] = useState<any>(null);
+  const [environmentBindings, setEnvironmentBindings] = useState<any[]>([]);
+  const [pm2Processes, setPm2Processes] = useState<any[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -58,6 +60,14 @@ export function ProjectWorkspace() {
           return;
         }
         setProject(resolved);
+
+        const runtimeId = resolved?.runtime_id || resolved?.id;
+        const [envs, pm2] = await Promise.all([
+          runtimeAPI.getProjectEnvironmentBindings(resolved.id).catch(() => []),
+          runtimeAPI.getPM2Processes(undefined, String(runtimeId)).catch(() => []),
+        ]);
+        setEnvironmentBindings(Array.isArray(envs) ? envs : []);
+        setPm2Processes(Array.isArray(pm2) ? pm2 : []);
       } catch {
         setError('تعذر تحميل بيانات المشروع');
       } finally {
@@ -71,6 +81,11 @@ export function ProjectWorkspace() {
     if (!project) return 'UNKNOWN';
     return String(project.status || 'unknown').toUpperCase();
   }, [project]);
+
+  const healthyBindings = useMemo(
+    () => environmentBindings.filter((item) => item?.validated).length,
+    [environmentBindings]
+  );
 
   if (isLoading) {
     return <div className="text-slate-400 text-sm">جاري تحميل Runtime Workspace...</div>;
@@ -89,7 +104,7 @@ export function ProjectWorkspace() {
       <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-5 md:p-6">
         <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500 mb-2">Runtime Project Workspace</p>
         <h1 className="text-xl md:text-2xl font-black text-white">{project.name}</h1>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
           <div className="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40">
             <p className="text-slate-500">Runtime Type</p>
             <p className="text-slate-700 dark:text-slate-200 font-bold">{project.type || project.runtime_type || 'N/A'}</p>
@@ -106,7 +121,39 @@ export function ProjectWorkspace() {
             <p className="text-slate-500">Runtime Path</p>
             <p className="text-slate-700 dark:text-slate-200 font-mono truncate">{project.runtime_path || 'N/A'}</p>
           </div>
+          <div className="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40">
+            <p className="text-slate-500">PM2 Processes</p>
+            <p className="text-slate-700 dark:text-slate-200 font-bold">{pm2Processes.length}</p>
+          </div>
+          <div className="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40">
+            <p className="text-slate-500">Validated Environments</p>
+            <p className="text-slate-700 dark:text-slate-200 font-bold">
+              {healthyBindings} / {environmentBindings.length}
+            </p>
+          </div>
         </div>
+      </div>
+
+      <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4">
+        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-3">Runtime Environment Bindings</p>
+        {environmentBindings.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300 font-bold">لا توجد بيانات تشغيلية حالياً</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {environmentBindings.map((env, idx) => (
+              <div key={`${env?.name || 'env'}-${idx}`} className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-3 space-y-1">
+                <p className="text-xs text-slate-500">Domain</p>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">{env?.realDomain || 'N/A'}</p>
+                <p className="text-xs text-slate-500">PM2 / Port</p>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{env?.pm2Process || 'N/A'} / {env?.runtimePort || 'N/A'}</p>
+                <p className="text-xs text-slate-500">Path</p>
+                <p className="text-xs font-mono text-slate-600 dark:text-slate-300 truncate">{env?.runtimePath || 'N/A'}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4">
