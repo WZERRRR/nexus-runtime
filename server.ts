@@ -3284,6 +3284,10 @@ async function startServer() {
     try {
       const runtimeId = String(req.params.id);
       const branch = req.body?.branch ? String(req.body.branch) : 'main';
+      const requestedBy = req.body?.requested_by ? String(req.body.requested_by) : 'RuntimeOperator';
+      const riskLevel = req.body?.risk_level ? String(req.body.risk_level).toLowerCase() : 'medium';
+      const approvalId = req.body?.approvalId ? String(req.body.approvalId) : undefined;
+      const mutationId = `mut-deploy-${runtimeId}-${Date.now()}`;
       const project = await getProjectById(runtimeId);
       if (!project?.runtime_path) {
         return res.status(404).json({ success: false, message: 'Runtime project path not found' });
@@ -3343,8 +3347,58 @@ async function startServer() {
           });
         });
 
+      const isHighRisk = ['high', 'critical'].includes(riskLevel);
+      const precheck = {
+        runtimePathExists: fs.existsSync(project.runtime_path),
+        gitRepoDetected: fs.existsSync(path.join(project.runtime_path, '.git')),
+        packageDetected: fs.existsSync(path.join(project.runtime_path, 'package.json')),
+        runtimeId,
+        mutationId,
+      };
+
+      if (!precheck.runtimePathExists) {
+        return res.status(422).json({
+          success: false,
+          message: 'Pre-check failed: runtime path unavailable',
+          data: { mutationId, precheck }
+        });
+      }
+
+      if (isHighRisk && !approvalId) {
+        const requestedApprovalId = await RuntimeApproval.requestApproval({
+          runtime_id: runtimeId,
+          operation_type: 'runtime_deploy' as any,
+          requested_by: requestedBy,
+          risk_level: riskLevel,
+          approval_reason: `High risk deploy requested for runtime ${runtimeId}`,
+        });
+        addRuntimeLog('warning', `[mutation:${mutationId}] Deploy blocked pending approval ${requestedApprovalId}`, 'deploy_runtime');
+        addGovernanceAction('RUNTIME_DEPLOY_APPROVAL', requestedBy, runtimeId, 'PENDING');
+        return res.status(202).json({
+          success: true,
+          data: {
+            status: 'PENDING_APPROVAL',
+            mutationId,
+            runtimeId,
+            requestedApprovalId,
+            riskLevel,
+            precheck,
+          }
+        });
+      }
+
+      if (approvalId) {
+        const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+        if (!approval) {
+          return res.status(403).json({ success: false, message: 'Approval record not found for runtime', violation_type: 'ApprovalGate' });
+        }
+        if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
+          return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
+        }
+      }
+
       updateDeployStatus(DeployStatus.VALIDATING);
-      addRuntimeLog('info', `Deploy ${deploymentId} started for runtime ${runtimeId} on branch ${branch}`, 'deploy_runtime');
+      addRuntimeLog('info', `[mutation:${mutationId}] Deploy ${deploymentId} started for runtime ${runtimeId} on branch ${branch}`, 'deploy_runtime');
 
       const cwd = project.runtime_path;
 
@@ -3439,15 +3493,24 @@ async function startServer() {
       const durationMs = Date.now() - startedAt;
       updateDeployStatus(DeployStatus.COMPLETED);
       addGovernanceAction('RUNTIME_DEPLOY', 'Runtime', runtimeId, 'COMPLETED');
-      addRuntimeLog('success', `Deploy ${deploymentId} completed in ${durationMs}ms`, 'deploy_runtime');
+      const postcheck = {
+        pm2Healthy: timeline.some((stage) => stage.stage === 'Health Check' && stage.status === 'ok'),
+        deployVerified: timeline.some((stage) => stage.stage === 'Deploy Verification' && stage.status !== 'failed'),
+        rollbackValidated: timeline.some((stage) => stage.stage === 'Rollback Validation' && stage.status !== 'failed'),
+      };
+      addRuntimeLog('success', `[mutation:${mutationId}] Deploy ${deploymentId} completed in ${durationMs}ms`, 'deploy_runtime');
 
       res.json({
         success: true,
         data: {
+          mutationId,
           deploymentId,
           snapshotId,
           runtimeId,
           branch,
+          riskLevel,
+          precheck,
+          postcheck,
           durationMs,
           status: 'COMPLETED',
           timeline,
@@ -3468,6 +3531,10 @@ async function startServer() {
     try {
       const runtimeId = String(req.params.id);
       const snapshotId = String(req.body?.snapshotId || '');
+      const requestedBy = req.body?.requested_by ? String(req.body.requested_by) : 'RuntimeOperator';
+      const riskLevel = req.body?.risk_level ? String(req.body.risk_level).toLowerCase() : 'medium';
+      const approvalId = req.body?.approvalId ? String(req.body.approvalId) : undefined;
+      const mutationId = `mut-rollback-${runtimeId}-${Date.now()}`;
       if (!snapshotId) return res.status(400).json({ success: false, message: 'snapshotId is required' });
 
       const governanceCheck = await validateExecutionPolicy('RUNTIME_RECOVERY', 'RuntimeOperator', 'Admin');
@@ -3482,6 +3549,57 @@ async function startServer() {
 
       const snap = sqliteDb.prepare('SELECT * FROM runtime_snapshots WHERE snapshot_id = ? AND runtime_id = ?').get(snapshotId, runtimeId) as any;
       if (!snap) return res.status(404).json({ success: false, message: 'Snapshot not found for runtime' });
+
+      const precheck = {
+        snapshotExists: Boolean(snap),
+        runtimePathExists: fs.existsSync(project.runtime_path),
+        runtimeId,
+        snapshotId,
+        mutationId,
+      };
+
+      if (!precheck.runtimePathExists) {
+        return res.status(422).json({
+          success: false,
+          message: 'Pre-check failed: runtime path unavailable',
+          data: { mutationId, precheck }
+        });
+      }
+
+      const isHighRisk = ['high', 'critical'].includes(riskLevel);
+      if (isHighRisk && !approvalId) {
+        const requestedApprovalId = await RuntimeApproval.requestApproval({
+          runtime_id: runtimeId,
+          operation_type: 'runtime_recovery' as any,
+          requested_by: requestedBy,
+          risk_level: riskLevel,
+          approval_reason: `High risk rollback requested for runtime ${runtimeId}`,
+        });
+        addRuntimeLog('warning', `[mutation:${mutationId}] Rollback blocked pending approval ${requestedApprovalId}`, 'recovery_runtime');
+        addGovernanceAction('RUNTIME_ROLLBACK_APPROVAL', requestedBy, runtimeId, 'PENDING');
+        return res.status(202).json({
+          success: true,
+          data: {
+            status: 'PENDING_APPROVAL',
+            mutationId,
+            runtimeId,
+            snapshotId,
+            requestedApprovalId,
+            riskLevel,
+            precheck,
+          }
+        });
+      }
+
+      if (approvalId) {
+        const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+        if (!approval) {
+          return res.status(403).json({ success: false, message: 'Approval record not found for runtime', violation_type: 'ApprovalGate' });
+        }
+        if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
+          return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
+        }
+      }
 
       const recoveryId = `rec-${Date.now()}`;
       sqliteDb.prepare(`
@@ -3507,7 +3625,7 @@ async function startServer() {
         if (result.status === 'failed') throw new Error(result.error || `${stage} failed`);
       };
 
-      addRuntimeLog('warning', `Rollback ${recoveryId} started for runtime ${runtimeId} via snapshot ${snapshotId}`, 'recovery_runtime');
+      addRuntimeLog('warning', `[mutation:${mutationId}] Rollback ${recoveryId} started for runtime ${runtimeId} via snapshot ${snapshotId}`, 'recovery_runtime');
 
       await runStage('Snapshot Validation', async () => ({ status: 'ok', output: `Snapshot ${snapshotId} validated` }));
       await runStage('Runtime Stop', async () => {
@@ -3547,14 +3665,23 @@ async function startServer() {
 
       sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('READY', recoveryId);
       addGovernanceAction('RUNTIME_ROLLBACK', 'Runtime', runtimeId, 'COMPLETED');
-      addRuntimeLog('success', `Rollback ${recoveryId} completed for runtime ${runtimeId}`, 'recovery_runtime');
+      const postcheck = {
+        runtimeVerified: timeline.some((stage) => stage.stage === 'Runtime Verification' && stage.status === 'ok'),
+        healthVerified: timeline.some((stage) => stage.stage === 'Health Check' && stage.status === 'ok'),
+        auditRecorded: timeline.some((stage) => stage.stage === 'Rollback Audit' && stage.status === 'ok'),
+      };
+      addRuntimeLog('success', `[mutation:${mutationId}] Rollback ${recoveryId} completed for runtime ${runtimeId}`, 'recovery_runtime');
 
       res.json({
         success: true,
         data: {
+          mutationId,
           recoveryId,
           runtimeId,
           snapshotId,
+          riskLevel,
+          precheck,
+          postcheck,
           durationMs: Date.now() - startedAt,
           timeline,
           startedAt: new Date(startedAt).toISOString(),
