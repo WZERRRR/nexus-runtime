@@ -102,6 +102,11 @@ export function TerminalPage() {
        return;
     }
     const res = await runtimeAPI.executeTerminalCommand(cmdRaw, undefined, context?.id);
+   if (res.success && res.data?.status === 'PENDING_APPROVAL') {
+     setOutput(prev => [...prev, { type: 'warning', text: `Mutation pending approval: ${res.data.requestedApprovalId || 'N/A'}` }]);
+     setIsExecuting(false);
+     return;
+   }
    if (res.success && res.data) {
      if (res.data.stdout) {
        setOutput(prev => [...prev, { type: 'system', text: res.data.stdout.trimEnd() }]);

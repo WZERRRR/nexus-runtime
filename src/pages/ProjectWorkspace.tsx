@@ -54,6 +54,7 @@ export function ProjectWorkspace() {
   const [deployments, setDeployments] = useState<any[]>([]);
   const [recoveries, setRecoveries] = useState<any[]>([]);
   const [governanceEvents, setGovernanceEvents] = useState<any[]>([]);
+  const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
@@ -68,7 +69,7 @@ export function ProjectWorkspace() {
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
@@ -77,6 +78,7 @@ export function ProjectWorkspace() {
       runtimeAPI.getRuntimeDeployments(runtimeId).catch(() => []),
       runtimeAPI.getRuntimeRecoveries(runtimeId).catch(() => []),
       runtimeAPI.getGovernanceActions().catch(() => []),
+      runtimeAPI.getRuntimeApprovals(runtimeId).catch(() => []),
     ]);
 
     setEnvironmentBindings(Array.isArray(envs) ? envs : []);
@@ -87,6 +89,7 @@ export function ProjectWorkspace() {
     setDeployments(Array.isArray(deployRows) ? deployRows : []);
     setRecoveries(Array.isArray(recoveryRows) ? recoveryRows : []);
     setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
+    setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
     setLastSync(new Date().toISOString());
   };
 
@@ -222,6 +225,15 @@ export function ProjectWorkspace() {
     } finally {
       setTerminalRunning(false);
     }
+  };
+
+  const handleApprovalDecision = async (approvalId: string, status: 'APPROVED' | 'REJECTED') => {
+    if (!project) return;
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    try {
+      await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'RuntimeOperator', `Decision from workspace: ${status}`);
+      await loadOperationalData(project);
+    } catch {}
   };
 
   if (isLoading) {
@@ -411,6 +423,26 @@ export function ProjectWorkspace() {
               <MetricPanel label="Telemetry" value={`CPU: ${runtimeMetrics?.cpu?.usagePercent ?? 'N/A'} | RAM: ${runtimeMetrics?.ram?.usagePercent ?? 'N/A'}`} />
               <MetricPanel label="Last Sync" value={lastSync ? new Date(lastSync).toLocaleString('ar-SA') : 'N/A'} />
               <MetricPanel label="Validated Environments" value={`${healthyBindings} / ${environmentBindings.length}`} />
+            </div>
+            <div className="mt-3 rounded-lg border border-slate-200 dark:border-white/10 p-2 bg-white dark:bg-slate-900/40">
+              <p className="text-xs text-slate-500 mb-2">Approvals Queue</p>
+              <div className="space-y-2 max-h-52 overflow-auto">
+                {runtimeApprovals.filter((row: any) => String(row?.approval_status || '').toUpperCase() === 'PENDING').length === 0 ? (
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                ) : runtimeApprovals
+                  .filter((row: any) => String(row?.approval_status || '').toUpperCase() === 'PENDING')
+                  .slice(0, 8)
+                  .map((row: any) => (
+                    <div key={row.id} className="rounded-md border border-slate-200 dark:border-white/10 p-2">
+                      <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.operation_type || 'operation'}</p>
+                      <p className="text-[10px] text-slate-500">{row.id} | Risk: {row.risk_level || 'N/A'}</p>
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <button onClick={() => handleApprovalDecision(row.id, 'APPROVED')} className="px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">Approve</button>
+                        <button onClick={() => handleApprovalDecision(row.id, 'REJECTED')} className="px-2 py-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-[10px] font-bold">Reject</button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
             </div>
           </div>
         )}

@@ -34,6 +34,11 @@ export interface RuntimeLog {
 }
 
 class RuntimeAPI {
+  private mutationSeq = 0;
+  private createMutationId(scope: string, runtimeId?: string | number) {
+    this.mutationSeq += 1;
+    return `mut-${scope}-${runtimeId || 'global'}-${Date.now()}-${this.mutationSeq}`;
+  }
   connectMutationStream(
     handlers: {
       onOpen?: () => void;
@@ -306,11 +311,25 @@ class RuntimeAPI {
     return res.json();
   }
 
-  async executeTerminalCommand(command: string, cwd?: string, projectId?: string | number): Promise<{ success: boolean, message?: string, data?: { stdout: string, stderr: string, error: string | null } }> {
+  async executeTerminalCommand(
+    command: string,
+    cwd?: string,
+    projectId?: string | number,
+    options?: { approvalId?: string; requestedBy?: string; riskLevel?: string; mutationId?: string }
+  ): Promise<{ success: boolean, message?: string, data?: any }> {
+    const mutationId = options?.mutationId || this.createMutationId('terminal', projectId);
     const res = await fetch('/api/runtime/terminal/exec', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, cwd, projectId })
+      body: JSON.stringify({
+        command,
+        cwd,
+        projectId,
+        mutationId,
+        approvalId: options?.approvalId,
+        requested_by: options?.requestedBy,
+        risk_level: options?.riskLevel
+      })
     });
     return res.json();
   }
@@ -343,11 +362,25 @@ class RuntimeAPI {
     return data.data;
   }
 
-  async performPM2Action(action: string, id: number): Promise<{ success: boolean, message: string }> {
+  async performPM2Action(
+    action: string,
+    id: number,
+    projectId?: string | number,
+    options?: { approvalId?: string; requestedBy?: string; riskLevel?: string; mutationId?: string }
+  ): Promise<{ success: boolean, message?: string, data?: any }> {
+    const mutationId = options?.mutationId || this.createMutationId('pm2', projectId);
     const res = await fetch('/api/runtime/pm2/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, id })
+      body: JSON.stringify({
+        action,
+        id,
+        projectId,
+        mutationId,
+        approvalId: options?.approvalId,
+        requested_by: options?.requestedBy,
+        risk_level: options?.riskLevel
+      })
     });
     return res.json();
   }
@@ -393,26 +426,30 @@ class RuntimeAPI {
     return data.data;
   }
 
-  async writeFile(path: string, content: string, root?: string, projectId?: string | number): Promise<void> {
+  async writeFile(path: string, content: string, root?: string, projectId?: string | number, mutationId?: string): Promise<any> {
     const url = projectId ? '/api/runtime/files/write' : '/api/files/write';
+    const resolvedMutationId = mutationId || this.createMutationId('fs-write', projectId);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, content, root, projectId })
+      body: JSON.stringify({ path, content, root, projectId, mutationId: resolvedMutationId })
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message);
+    return data;
   }
 
-  async deleteFiles(paths: string[], root?: string, projectId?: string | number): Promise<void> {
+  async deleteFiles(paths: string[], root?: string, projectId?: string | number, mutationId?: string): Promise<any> {
     const url = projectId ? '/api/runtime/files/delete' : '/api/files/delete';
+    const resolvedMutationId = mutationId || this.createMutationId('fs-delete', projectId);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths, root, projectId })
+      body: JSON.stringify({ paths, root, projectId, mutationId: resolvedMutationId })
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message);
+    return data;
   }
 
   async createDirectory(path: string, root?: string, projectId?: string | number): Promise<void> {
@@ -930,6 +967,22 @@ class RuntimeAPI {
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Rollback failed');
     return data.data;
+  }
+
+  async getRuntimeApprovals(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch approvals');
+    return data.data || [];
+  }
+
+  async reviewRuntimeApproval(runtimeId: string | number, approvalId: string, status: 'APPROVED' | 'REJECTED', reviewedBy: string = 'RuntimeOperator', reason: string = ''): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reviewed_by: reviewedBy, reason })
+    });
+    return res.json();
   }
 }
 

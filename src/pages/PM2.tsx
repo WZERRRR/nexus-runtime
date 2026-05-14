@@ -60,8 +60,12 @@ export function PM2Manager() {
     setConfirmAction(null);
     setLoadingId(procId);
     try {
-      const res = await runtimeAPI.performPM2Action(type, procId);
+      const res = await runtimeAPI.performPM2Action(type, procId, context?.id);
       if (res.success) {
+        if (res.data?.status === 'PENDING_APPROVAL') {
+          showToast('العملية بانتظار الموافقة التشغيلية', 'success');
+          return;
+        }
         showToast('تم تنفيذ العملية بنجاح', 'success');
         await fetchProcesses();
       } else {
