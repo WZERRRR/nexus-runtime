@@ -85,7 +85,7 @@ export function PM2Manager() {
   }), [processes]);
 
   return (
-    <div className="space-y-3 pb-6" dir="rtl">
+    <div className="space-y-2 pb-6" dir="rtl">
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -109,7 +109,7 @@ export function PM2Manager() {
             {context && (
               <button
                 onClick={() => navigate('/logs', { state: { project: context } })}
-                className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/20 text-xs font-bold"
+                className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/20 text-xs font-bold"
               >
                 <Clock className="w-3.5 h-3.5" />
                 السجلات
@@ -117,7 +117,7 @@ export function PM2Manager() {
             )}
             <button
               onClick={fetchProcesses}
-              className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-900/40 rounded-lg border border-[var(--border-subtle)] text-xs font-bold"
+              className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-slate-900/40 rounded-xl border border-[var(--border-subtle)] text-xs font-bold"
             >
               <RotateCw className="w-3.5 h-3.5" />
               تحديث
@@ -156,7 +156,7 @@ export function PM2Manager() {
                     <p className="text-[10px] text-[var(--text-tertiary)] truncate">{proc.path || 'N/A'} · Port {proc.port || 'N/A'}</p>
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-1 rounded-md border text-[10px] font-bold ${statusClass(proc.status)}`}>
+                    <span className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${statusClass(proc.status)}`}>
                       {String(proc.status || 'unknown').toUpperCase()}
                     </span>
                   </td>
@@ -190,7 +190,7 @@ export function PM2Manager() {
           {processes.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
           ) : processes.slice(0, 8).map((proc, i) => (
-            <div key={`${proc.id}-${i}-feed`} className="rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
+            <div key={`${proc.id}-${i}-feed`} className="rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
               <p className="text-xs font-bold text-[var(--text-primary)]">{proc.name}</p>
               <p className={`text-[10px] font-bold ${statusClass(proc.status).split(' ')[0]}`}>{String(proc.status || 'unknown').toUpperCase()} · restart={proc.restarts ?? 0}</p>
             </div>

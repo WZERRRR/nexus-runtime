@@ -125,34 +125,34 @@ export function LogsCenter() {
   };
 
   return (
-    <div className="space-y-3 h-[calc(100vh-6rem)] flex flex-col" dir="rtl">
+    <div className="space-y-2 h-[calc(100vh-6rem)] flex flex-col" dir="rtl">
       <ProjectHeader
         projectName={context?.name}
         project={context}
         sectionName="Live Runtime Stream Console"
         actions={
           <div className="flex items-center gap-2">
-            <button onClick={() => setIsLive((v) => !v)} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 ${isLive ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
+            <button onClick={() => setIsLive((v) => !v)} className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 ${isLive ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
               {isLive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
               {isLive ? 'Pause' : 'Resume'}
             </button>
-            <button onClick={exportLogs} className="p-2 rounded-lg border border-slate-200 dark:border-white/10">
+            <button onClick={exportLogs} className="p-2 rounded-xl border border-slate-200 dark:border-white/10">
               <Download className="w-4 h-4" />
             </button>
           </div>
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 flex-1 min-h-0">
         <div className="lg:col-span-3 space-y-3">
-          <div className="glass-panel rounded-xl p-3 space-y-2">
+          <div className="glass-panel rounded-xl p-2.5 space-y-2">
             <label className="text-[10px] font-bold text-slate-500 uppercase">Search</label>
-            <div className="flex items-center gap-2 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-2">
+            <div className="flex items-center gap-2 border border-slate-200 dark:border-white/10 rounded-xl px-2 py-2">
               <Search className="w-4 h-4 text-slate-500" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent outline-none text-xs w-full" placeholder="message or service" />
             </div>
             <label className="text-[10px] font-bold text-slate-500 uppercase">Level</label>
-            <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevel)} className="w-full rounded-lg px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
+            <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevel)} className="w-full rounded-xl px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
               <option value="all">all</option>
               <option value="info">info</option>
               <option value="warning">warning</option>
@@ -160,12 +160,12 @@ export function LogsCenter() {
               <option value="success">success</option>
             </select>
             <label className="text-[10px] font-bold text-slate-500 uppercase">Service</label>
-            <select value={filterService} onChange={(e) => setFilterService(e.target.value)} className="w-full rounded-lg px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
+            <select value={filterService} onChange={(e) => setFilterService(e.target.value)} className="w-full rounded-xl px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
               {services.map((srv) => <option key={srv} value={srv}>{srv}</option>)}
             </select>
           </div>
 
-          <div className="glass-panel rounded-xl p-3">
+          <div className="glass-panel rounded-xl p-2.5">
             <div className="flex items-center gap-2 mb-2">
               <Filter className="w-4 h-4 text-slate-500" />
               <span className="text-[10px] font-bold uppercase text-slate-500">Channels</span>
