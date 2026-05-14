@@ -365,6 +365,33 @@ function governanceError(res: any, status: number, message: string, errorCode: s
   return res.status(status).json({ success: false, message, error_code: errorCode, ...(extra || {}) });
 }
 
+const GOVERNANCE_ROLE_LEVELS: Record<string, number> = {
+  runtimeoperator: 1,
+  operator: 1,
+  admin: 2,
+  'super admin': 3,
+  super_admin: 3,
+  superadmin: 3
+};
+
+function resolveActorRole(body: any) {
+  return String(body?.actor_role || body?.requested_by_role || body?.reviewed_by || body?.requested_by || '').trim();
+}
+
+function enforceRuntimeRole(req: any, res: any, requiredRole: 'Admin' | 'Super Admin') {
+  const actorRole = resolveActorRole(req.body);
+  if (!actorRole) {
+    return { allowed: true, actorRole: 'RuntimeOperator', weakSignal: true };
+  }
+  const actorLevel = GOVERNANCE_ROLE_LEVELS[String(actorRole).toLowerCase()] || 0;
+  const requiredLevel = GOVERNANCE_ROLE_LEVELS[String(requiredRole).toLowerCase()] || 2;
+  if (actorLevel < requiredLevel) {
+    governanceError(res, 403, `Insufficient governance role. Required: ${requiredRole}`, 'RBAC_ROLE_GATE');
+    return { allowed: false, actorRole, weakSignal: false };
+  }
+  return { allowed: true, actorRole, weakSignal: false };
+}
+
 function canReplayByRole(role: string) {
   const normalized = String(role || '').trim().toLowerCase();
   return normalized === 'admin' || normalized === 'super admin' || normalized === 'super_admin';
@@ -2499,6 +2526,8 @@ async function startServer() {
      const { action, id, projectId, approvalId, requested_by, risk_level, mutationId: qMutationId } = req.body;
      const allowedOpts = ['start', 'stop', 'restart', 'delete'];
      if (!allowedOpts.includes(action)) return res.json({ success: false, message: 'Invalid action' });
+     const roleGate = enforceRuntimeRole(req, res, action === 'delete' ? 'Super Admin' : 'Admin');
+     if (!roleGate.allowed) return;
      const governanceCheck = await validateExecutionPolicy('PM2_MUTATION', 'RuntimeOperator', 'Admin');
      if (!governanceCheck.allowed) {
        return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
@@ -2665,6 +2694,8 @@ async function startServer() {
     }
 
     if (!finalCommand) return res.status(400).json({ success: false, message: "Command required." });
+    const roleGate = enforceRuntimeRole(req, res, 'Admin');
+    if (!roleGate.allowed) return;
     const governanceCheck = await validateExecutionPolicy('TERMINAL_EXEC', 'RuntimeOperator', 'Admin');
     if (!governanceCheck.allowed) {
       return governanceError(res, 403, governanceCheck.reason, 'GOVERNANCE_POLICY_GATE', { violation_type: 'GovernancePolicyGate' });
@@ -4218,6 +4249,8 @@ async function startServer() {
 
   app.post("/api/runtime/:id/deploy", async (req, res) => {
     try {
+      const roleGate = enforceRuntimeRole(req, res, 'Admin');
+      if (!roleGate.allowed) return;
       const runtimeId = String(req.params.id);
       const branch = req.body?.branch ? String(req.body.branch) : 'main';
       const requestedBy = req.body?.requested_by ? String(req.body.requested_by) : 'RuntimeOperator';
@@ -4479,6 +4512,8 @@ async function startServer() {
 
   app.post("/api/runtime/:id/rollback", async (req, res) => {
     try {
+      const roleGate = enforceRuntimeRole(req, res, 'Super Admin');
+      if (!roleGate.allowed) return;
       const runtimeId = String(req.params.id);
       const snapshotId = String(req.body?.snapshotId || '');
       const requestedBy = req.body?.requested_by ? String(req.body.requested_by) : 'RuntimeOperator';
@@ -4642,6 +4677,89 @@ async function startServer() {
         addRuntimeLog('error', `Rollback failed for runtime ${req.params.id}: ${e.message}`, 'recovery_runtime');
       } catch {}
       res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  app.get("/api/runtime/:id/readiness-report", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const project = await getProjectById(runtimeId);
+      const hasRuntimePath = Boolean(project?.runtime_path && fs.existsSync(project.runtime_path));
+      const hasDomainBinding = Boolean(project?.domain);
+      const latestDeploy = sqliteDb.prepare(`
+        SELECT deployment_id, deploy_status, created_at, executed_at
+        FROM runtime_deployments
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(runtimeId) as any;
+      const latestRecovery = sqliteDb.prepare(`
+        SELECT recovery_id, recovery_status, created_at
+        FROM runtime_recovery
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(runtimeId) as any;
+      const approvalStats = sqliteDb.prepare(`
+        SELECT
+          SUM(CASE WHEN approval_status = 'PENDING' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN approval_status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
+          SUM(CASE WHEN approval_status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected
+        FROM runtime_approvals
+        WHERE runtime_id = ?
+      `).get(runtimeId) as any;
+
+      let pm2Online = false;
+      let verification: any = { ok: false, reason: 'Runtime path unavailable' };
+      if (hasRuntimePath) {
+        const runCommand = (command: string, cwd: string, timeout = 120000) =>
+          new Promise<{ stdout: string; stderr: string; error: string | null }>((resolve) => {
+            exec(command, { cwd, timeout }, (error, stdout, stderr) => {
+              resolve({ stdout: stdout || '', stderr: stderr || '', error: error ? error.message : null });
+            });
+          });
+        verification = await runRuntimeVerificationGates(project, runCommand);
+        pm2Online = verification.ok || verification.code !== 'PM2_HEALTH_GATE_FAILED';
+      }
+
+      const scoreParts = [
+        hasRuntimePath ? 20 : 0,
+        hasDomainBinding ? 15 : 0,
+        verification.ok ? 30 : 0,
+        String(latestDeploy?.deploy_status || '').toUpperCase() === 'COMPLETED' ? 20 : 0,
+        String(latestRecovery?.recovery_status || '').toUpperCase() === 'READY' ? 10 : 0,
+        Number(approvalStats?.pending || 0) === 0 ? 5 : 0
+      ];
+      const readinessScore = scoreParts.reduce((a, b) => a + b, 0);
+      const status = readinessScore >= 90 ? 'PRODUCTION_READY' : readinessScore >= 70 ? 'HARDENING_REQUIRED' : 'NOT_READY';
+
+      res.json({
+        success: true,
+        data: {
+          runtimeId,
+          project: project ? { id: project.id, name: project.name, runtime_path: project.runtime_path, domain: project.domain, runtime_process: project.runtime_process } : null,
+          readinessScore,
+          status,
+          checks: {
+            hasRuntimePath,
+            hasDomainBinding,
+            pm2Online,
+            verification
+          },
+          governance: {
+            pendingApprovals: Number(approvalStats?.pending || 0),
+            approvedApprovals: Number(approvalStats?.approved || 0),
+            rejectedApprovals: Number(approvalStats?.rejected || 0)
+          },
+          latest: {
+            deploy: latestDeploy || null,
+            recovery: latestRecovery || null
+          },
+          generatedAt: new Date().toISOString()
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message || 'Readiness report failed' });
     }
   });
 
