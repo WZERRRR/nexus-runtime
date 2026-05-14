@@ -69,9 +69,7 @@ export function LogsCenter() {
       wsRef.current = null;
     };
 
-    ws.onerror = () => {
-      setStatus('disconnected');
-    };
+    ws.onerror = () => setStatus('disconnected');
   };
 
   useEffect(() => {
@@ -93,10 +91,10 @@ export function LogsCenter() {
     if (isLive) {
       ws.send(JSON.stringify({ type: 'resume' }));
       setStatus('live');
-    } else {
-      ws.send(JSON.stringify({ type: 'pause' }));
-      setStatus('paused');
+      return;
     }
+    ws.send(JSON.stringify({ type: 'pause' }));
+    setStatus('paused');
   }, [isLive]);
 
   useEffect(() => {
@@ -127,17 +125,14 @@ export function LogsCenter() {
   };
 
   return (
-    <div className="space-y-5 h-[calc(100vh-6rem)] flex flex-col">
+    <div className="space-y-3 h-[calc(100vh-6rem)] flex flex-col" dir="rtl">
       <ProjectHeader
         projectName={context?.name}
         project={context}
-        sectionName="Runtime Streaming Logs"
+        sectionName="Live Runtime Stream Console"
         actions={
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsLive((v) => !v)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 ${isLive ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}
-            >
+            <button onClick={() => setIsLive((v) => !v)} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 ${isLive ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`}>
               {isLive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
               {isLive ? 'Pause' : 'Resume'}
             </button>
@@ -148,32 +143,32 @@ export function LogsCenter() {
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-1 min-h-0">
-        <div className="lg:col-span-1 space-y-3">
-          <div className="glass-panel rounded-2xl p-4 space-y-3">
-            <label className="text-[11px] font-bold text-slate-500 uppercase">Search</label>
-            <div className="flex items-center gap-2 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
+        <div className="lg:col-span-3 space-y-3">
+          <div className="glass-panel rounded-xl p-3 space-y-2">
+            <label className="text-[10px] font-bold text-slate-500 uppercase">Search</label>
+            <div className="flex items-center gap-2 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-2">
               <Search className="w-4 h-4 text-slate-500" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent outline-none text-xs w-full" placeholder="message or service" />
             </div>
-            <label className="text-[11px] font-bold text-slate-500 uppercase">Level</label>
-            <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevel)} className="w-full rounded-lg px-3 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
+            <label className="text-[10px] font-bold text-slate-500 uppercase">Level</label>
+            <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevel)} className="w-full rounded-lg px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
               <option value="all">all</option>
               <option value="info">info</option>
               <option value="warning">warning</option>
               <option value="error">error</option>
               <option value="success">success</option>
             </select>
-            <label className="text-[11px] font-bold text-slate-500 uppercase">Service</label>
-            <select value={filterService} onChange={(e) => setFilterService(e.target.value)} className="w-full rounded-lg px-3 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
+            <label className="text-[10px] font-bold text-slate-500 uppercase">Service</label>
+            <select value={filterService} onChange={(e) => setFilterService(e.target.value)} className="w-full rounded-lg px-2 py-2 bg-slate-100 dark:bg-slate-900 text-xs">
               {services.map((srv) => <option key={srv} value={srv}>{srv}</option>)}
             </select>
           </div>
 
-          <div className="glass-panel rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-3">
+          <div className="glass-panel rounded-xl p-3">
+            <div className="flex items-center gap-2 mb-2">
               <Filter className="w-4 h-4 text-slate-500" />
-              <span className="text-[11px] font-bold uppercase text-slate-500">Channels</span>
+              <span className="text-[10px] font-bold uppercase text-slate-500">Channels</span>
             </div>
             <div className="space-y-2">
               {CHANNELS.map((channel) => (
@@ -181,29 +176,27 @@ export function LogsCenter() {
                   <input
                     type="checkbox"
                     checked={channels.includes(channel)}
-                    onChange={(e) => {
-                      setChannels((prev) => e.target.checked ? [...prev, channel] : prev.filter((c) => c !== channel));
-                    }}
+                    onChange={(e) => setChannels((prev) => e.target.checked ? [...prev, channel] : prev.filter((c) => c !== channel))}
                   />
                   {channel}
                 </label>
               ))}
             </div>
-            <div className="mt-4 text-[11px] text-slate-500">Status: {status}</div>
-            <div className="text-[11px] text-slate-500">Logs: {filteredLogs.length}</div>
+            <div className="mt-3 text-[10px] text-slate-500">Status: {status}</div>
+            <div className="text-[10px] text-slate-500">Logs: {filteredLogs.length}</div>
           </div>
         </div>
 
-        <div className="lg:col-span-3 glass-panel rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
+        <div className="lg:col-span-9 glass-panel rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b border-slate-200 dark:border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-bold">
               <Activity className="w-4 h-4 text-emerald-500" />
               Live Tail
             </div>
-            <div className="text-[11px] text-slate-500">{runtimeId ? `Runtime: ${runtimeId}` : 'Global Runtime Stream'}</div>
+            <div className="text-[10px] text-slate-500">{runtimeId ? `Runtime: ${runtimeId}` : 'Global Runtime Stream'}</div>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-auto p-3 font-mono text-xs bg-[#0a0f1c]">
+          <div ref={scrollRef} className="flex-1 overflow-auto p-2 font-mono text-xs bg-[#0a0f1c]">
             {filteredLogs.length === 0 ? (
               <div className="h-full grid place-items-center text-slate-500">لا توجد بيانات تشغيلية حالياً</div>
             ) : (
