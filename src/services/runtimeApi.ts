@@ -772,6 +772,24 @@ class RuntimeAPI {
     if (!data.success) throw new Error(data.message || 'Failed to fetch environment bindings');
     return data.data || [];
   }
+
+  async getRuntimeDeployments(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/deployments`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch deployments');
+    return data.data || [];
+  }
+
+  async runGovernedDeploy(runtimeId: string | number, branch?: string): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Deploy failed');
+    return data.data;
+  }
 }
 
 export const runtimeAPI = new RuntimeAPI();

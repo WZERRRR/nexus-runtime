@@ -3100,10 +3100,150 @@ async function startServer() {
 
   app.post("/api/runtime/:id/deploy", async (req, res) => {
     try {
-      const { RuntimeDeploy } = await import('./server/runtime/runtimeDeploy.js');
-      await RuntimeDeploy.deploy(req.params.id, req.body.branch);
-      res.json({ success: true, message: 'Deployment triggered for runtime' });
+      const runtimeId = String(req.params.id);
+      const branch = req.body?.branch ? String(req.body.branch) : 'main';
+      const project = await getProjectById(runtimeId);
+      if (!project?.runtime_path) {
+        return res.status(404).json({ success: false, message: 'Runtime project path not found' });
+      }
+
+      const governanceCheck = await validateExecutionPolicy('RUNTIME_DEPLOY', 'RuntimeOperator', 'Admin');
+      if (!governanceCheck.allowed) {
+        return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+      }
+
+      const { RuntimeDeploy, DeployStrategy, DeployStatus } = await import('./server/runtime/runtimeDeployGovernance.js');
+      const deploymentId = `dep-${Date.now()}`;
+      const startedAt = Date.now();
+      const timeline: Array<{ stage: string; status: 'ok' | 'failed' | 'skipped'; startedAt: string; endedAt: string; durationMs: number; output?: string; error?: string }> = [];
+
+      await RuntimeDeploy.requestDeploy({
+        runtime_id: runtimeId,
+        deployment_id: deploymentId,
+        requested_by: 'RuntimeOperator',
+        risk_level: 'medium',
+        deploy_strategy: DeployStrategy.SAFE_DEPLOY,
+      });
+
+      const updateDeployStatus = (status: string) => {
+        try {
+          sqliteDb.prepare('UPDATE runtime_deployments SET deploy_status = ?, executed_at = CURRENT_TIMESTAMP WHERE runtime_id = ? AND deployment_id = ?')
+            .run(status, runtimeId, deploymentId);
+        } catch {}
+      };
+
+      const runStage = async (stage: string, fn: () => Promise<{ status: 'ok' | 'failed' | 'skipped'; output?: string; error?: string }>) => {
+        const s = Date.now();
+        const startedAtIso = new Date(s).toISOString();
+        const result = await fn();
+        const e = Date.now();
+        timeline.push({
+          stage,
+          status: result.status,
+          startedAt: startedAtIso,
+          endedAt: new Date(e).toISOString(),
+          durationMs: e - s,
+          output: result.output,
+          error: result.error,
+        });
+        if (result.status === 'failed') throw new Error(result.error || `${stage} failed`);
+      };
+
+      const runCommand = (command: string, cwd: string, timeout = 120000) =>
+        new Promise<{ stdout: string; stderr: string; error: string | null }>((resolve) => {
+          exec(command, { cwd, timeout }, (error, stdout, stderr) => {
+            resolve({
+              stdout: stdout || '',
+              stderr: stderr || '',
+              error: error ? error.message : null,
+            });
+          });
+        });
+
+      updateDeployStatus(DeployStatus.VALIDATING);
+      addRuntimeLog('info', `Deploy ${deploymentId} started for runtime ${runtimeId} on branch ${branch}`, 'deploy_runtime');
+
+      const cwd = project.runtime_path;
+
+      await runStage('Git Pull', async () => {
+        if (!fs.existsSync(path.join(cwd, '.git'))) return { status: 'skipped', output: '.git not found' };
+        const r = await runCommand(`git pull origin ${branch}`, cwd, 180000);
+        if (r.error) return { status: 'failed', error: r.error, output: `${r.stdout}\n${r.stderr}` };
+        return { status: 'ok', output: r.stdout };
+      });
+
+      await runStage('Dependency Install', async () => {
+        if (!fs.existsSync(path.join(cwd, 'package.json'))) return { status: 'skipped', output: 'package.json not found' };
+        const r = await runCommand('npm install --no-audit --no-fund', cwd, 300000);
+        if (r.error) return { status: 'failed', error: r.error, output: `${r.stdout}\n${r.stderr}` };
+        return { status: 'ok', output: r.stdout };
+      });
+
+      await runStage('Runtime Validation', async () => {
+        const pathExists = fs.existsSync(cwd);
+        if (!pathExists) return { status: 'failed', error: 'Runtime path unavailable' };
+        return { status: 'ok', output: `Runtime path validated: ${cwd}` };
+      });
+
+      await runStage('Build', async () => {
+        if (!fs.existsSync(path.join(cwd, 'package.json'))) return { status: 'skipped', output: 'No Node build detected' };
+        const r = await runCommand('npm run build', cwd, 300000);
+        if (r.error) return { status: 'failed', error: r.error, output: `${r.stdout}\n${r.stderr}` };
+        return { status: 'ok', output: r.stdout };
+      });
+
+      updateDeployStatus(DeployStatus.DEPLOYING);
+
+      await runStage('PM2 Restart', async () => {
+        const target = project.runtime_process ? String(project.runtime_process) : 'all';
+        const r = await runCommand(`npx -y pm2 restart ${target}`, cwd, 120000);
+        if (r.error) return { status: 'failed', error: r.error, output: `${r.stdout}\n${r.stderr}` };
+        return { status: 'ok', output: r.stdout };
+      });
+
+      await runStage('Health Check', async () => {
+        const r = await runCommand('npx -y pm2 jlist', cwd, 120000);
+        if (r.error) return { status: 'failed', error: r.error };
+        const parsed = r.stdout?.trim() ? JSON.parse(r.stdout) : [];
+        const online = Array.isArray(parsed) ? parsed.filter((p: any) => p?.pm2_env?.status === 'online').length : 0;
+        if (online === 0) return { status: 'failed', error: 'No online PM2 processes after restart' };
+        return { status: 'ok', output: `${online} PM2 process(es) online` };
+      });
+
+      await runStage('Deploy Verification', async () => {
+        const distExists = fs.existsSync(path.join(cwd, 'dist')) || fs.existsSync(path.join(cwd, 'build'));
+        return { status: distExists ? 'ok' : 'skipped', output: distExists ? 'Artifact directory detected' : 'No artifact directory detected' };
+      });
+
+      await runStage('Rollback Validation', async () => {
+        const restorePoints = getRestorePoints();
+        const hasRestore = Array.isArray(restorePoints) && restorePoints.length > 0;
+        return { status: hasRestore ? 'ok' : 'skipped', output: hasRestore ? 'Recovery points available' : 'No recovery point found yet' };
+      });
+
+      const durationMs = Date.now() - startedAt;
+      updateDeployStatus(DeployStatus.COMPLETED);
+      addGovernanceAction('RUNTIME_DEPLOY', 'Runtime', runtimeId, 'COMPLETED');
+      addRuntimeLog('success', `Deploy ${deploymentId} completed in ${durationMs}ms`, 'deploy_runtime');
+
+      res.json({
+        success: true,
+        data: {
+          deploymentId,
+          runtimeId,
+          branch,
+          durationMs,
+          status: 'COMPLETED',
+          timeline,
+          startedAt: new Date(startedAt).toISOString(),
+          endedAt: new Date().toISOString(),
+        }
+      });
     } catch (e: any) {
+      try {
+        addGovernanceAction('RUNTIME_DEPLOY', 'Runtime', req.params.id, 'FAILED');
+        addRuntimeLog('error', `Deploy failed for runtime ${req.params.id}: ${e.message}`, 'deploy_runtime');
+      } catch {}
       res.status(500).json({ success: false, message: e.message });
     }
   });
