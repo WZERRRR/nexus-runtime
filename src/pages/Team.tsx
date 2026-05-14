@@ -38,9 +38,28 @@ export function TeamManager() {
  const context = state?.project;
  const [searchTerm, setSearchTerm] = useState('');
  const [isInviteOpen, setIsInviteOpen] = useState(false);
+ const [toast, setToast] = useState<string | null>(null);
+
+ const showToast = (message: string) => {
+ setToast(message);
+ window.setTimeout(() => setToast(null), 2800);
+ };
 
  return (
  <div className="space-y-8 flex flex-col lg:h-[calc(100vh-6rem)] lg:overflow-hidden text-right font-sans pb-12 lg:pb-0" dir="rtl">
+ <AnimatePresence>
+ {toast && (
+ <motion.div
+ initial={{ opacity: 0, y: -20, x: '-50%' }}
+ animate={{ opacity: 1, y: 20, x: '-50%' }}
+ exit={{ opacity: 0, y: -20, x: '-50%' }}
+ className="fixed top-4 left-1/2 z-[150] px-5 py-3 rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-300 text-xs font-bold shadow-2xl backdrop-blur-md"
+ >
+ {toast}
+ </motion.div>
+ )}
+ </AnimatePresence>
+
  <ProjectHeader 
  projectName={context?.name}
  projectDescription={context ? undefined : "إدارة القوى العاملة التقنية: إضافة أعضاء الفريق، التحكم في مستويات الوصول (RBAC)، ومراقبة النشاط الأمني."}
@@ -183,10 +202,10 @@ export function TeamManager() {
  </td>
  <td className="px-8 py-6">
  <div className="flex gap-2 justify-center opacity-40 group-hover:opacity-100 transition-opacity">
- <button className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-blue-400 hover:border-blue-500/30 transition-all">
+ <button onClick={() => showToast(`تم فتح إعدادات العضو: ${member.name}`)} className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-blue-400 hover:border-blue-500/30 transition-all">
  <Settings2 className="w-4 h-4" />
  </button>
- <button className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-all">
+ <button onClick={() => showToast(`تم طلب إزالة العضو: ${member.name}`,)} className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-all">
  <Trash2 className="w-4 h-4" />
  </button>
  </div>
@@ -266,7 +285,7 @@ export function TeamManager() {
  </div>
  ))}
  
- <button className="w-full py-4 border border-dashed border-slate-200 dark:border-white/10 rounded-3xl text-slate-500 hover:text-white hover:border-slate-200 dark:border-white/20 transition-all text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
+ <button onClick={() => showToast('تم فتح نموذج إضافة مستوى وصول جديد')} className="w-full py-4 border border-dashed border-slate-200 dark:border-white/10 rounded-3xl text-slate-500 hover:text-white hover:border-slate-200 dark:border-white/20 transition-all text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2">
  <Plus className="w-4 h-4" /> إضافة مستوى وصول جديد
  </button>
  </div>
@@ -353,7 +372,7 @@ export function TeamManager() {
  <button onClick={() => setIsInviteOpen(false)} className="flex-1 py-4 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 text-slate-500 font-black text-[10px] uppercase tracking-widest rounded-2xl transition-all">
  CANCEL
  </button>
- <button className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl shadow-lg shadow-blue-500/20 transition-all active:scale-95">
+ <button onClick={() => showToast('تم إرسال دعوة العضو بنجاح')} className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl shadow-lg shadow-blue-500/20 transition-all active:scale-95">
  SEND INVITATION
  </button>
  </div>

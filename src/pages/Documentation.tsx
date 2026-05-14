@@ -4,6 +4,12 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export const Documentation = () => {
  const [activeTab, setActiveTab] = useState<'docs' | 'report'>('docs');
+ const [toast, setToast] = useState<string | null>(null);
+
+ const showToast = (message: string) => {
+ setToast(message);
+ window.setTimeout(() => setToast(null), 2800);
+ };
 
  const readinessMetrics = [
  { label: 'System Health Score', value: '98%', status: 'Optimal', icon: Activity, color: 'text-emerald-500' },
@@ -16,6 +22,18 @@ export const Documentation = () => {
 
  return (
  <div className="space-y-8 animate-in fade-in duration-700">
+ <AnimatePresence>
+ {toast && (
+ <motion.div
+ initial={{ opacity: 0, y: -20, x: '-50%' }}
+ animate={{ opacity: 1, y: 20, x: '-50%' }}
+ exit={{ opacity: 0, y: -20, x: '-50%' }}
+ className="fixed top-4 left-1/2 z-[150] px-5 py-3 rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-300 text-xs font-bold shadow-2xl backdrop-blur-md"
+ >
+ {toast}
+ </motion.div>
+ )}
+ </AnimatePresence>
  <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 gap-4">
  <div>
  <h2 className="text-2xl font-black text-white uppercase tracking-tight flex items-center gap-3">
@@ -130,15 +148,15 @@ export const Documentation = () => {
  <Zap className="w-4 h-4 text-yellow-400" />
  </h3>
  <div className="space-y-2">
- <button className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
+ <button onClick={() => showToast('تم فتح دليل الأكواد والأنماط')} className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
  دليل الأكواد والأنماط
  <Info className="w-3 h-3" />
  </button>
- <button className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
+ <button onClick={() => showToast('تم فتح خارطة طريق التوسعة')} className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
  خريطة طريق التوسعة
  <Info className="w-3 h-3" />
  </button>
- <button className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
+ <button onClick={() => showToast('تم فتح نماذج التقارير الإدارية')} className="w-full text-right p-3 hover:bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400 transition-colors flex items-center justify-end gap-2">
  نماذج التقارير الإدارية
  <Info className="w-3 h-3" />
  </button>
@@ -226,7 +244,7 @@ export const Documentation = () => {
  <span>|</span>
  <span>Certified by: Neural AI Auditor</span>
  </div>
- <button className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2">
+ <button onClick={() => showToast('تم تجهيز تصدير التقرير الفني (PDF/JSON)')} className="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2">
  <FileText className="w-4 h-4" />
  تصدير التقرير الفني (PDF/JSON)
  </button>
