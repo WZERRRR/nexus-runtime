@@ -983,6 +983,13 @@ class RuntimeAPI {
     return data.data || [];
   }
 
+  async getRuntimeMutationTimeline(runtimeId: string | number, limit: number = 160): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/mutation-timeline?limit=${limit}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch mutation timeline');
+    return data.data || [];
+  }
+
   async reviewRuntimeApproval(runtimeId: string | number, approvalId: string, status: 'APPROVED' | 'REJECTED', reviewedBy: string = 'RuntimeOperator', reason: string = ''): Promise<any> {
     const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}`, {
       method: 'PUT',

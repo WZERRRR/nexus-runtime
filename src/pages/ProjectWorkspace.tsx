@@ -34,7 +34,7 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.Rea
   { id: 'recovery', label: 'Recovery', icon: <LifeBuoy className="w-4 h-4" />, route: '/backup' },
 ];
 
-type TimelineFilter = 'all' | 'runtime' | 'deploy' | 'recovery' | 'governance';
+type TimelineFilter = 'all' | 'approval' | 'mutation' | 'deploy' | 'recovery';
 
 export function ProjectWorkspace() {
   const { id } = useParams();
@@ -56,6 +56,7 @@ export function ProjectWorkspace() {
   const [governanceEvents, setGovernanceEvents] = useState<any[]>([]);
   const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
   const [pendingMutations, setPendingMutations] = useState<any[]>([]);
+  const [mutationTimeline, setMutationTimeline] = useState<any[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [operationNotice, setOperationNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -71,7 +72,7 @@ export function ProjectWorkspace() {
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows, mutationTimelineRows] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
@@ -82,6 +83,7 @@ export function ProjectWorkspace() {
       runtimeAPI.getGovernanceActions().catch(() => []),
       runtimeAPI.getRuntimeApprovals(runtimeId).catch(() => []),
       runtimeAPI.getRuntimePendingMutations(runtimeId).catch(() => []),
+      runtimeAPI.getRuntimeMutationTimeline(runtimeId, 160).catch(() => []),
     ]);
 
     setEnvironmentBindings(Array.isArray(envs) ? envs : []);
@@ -94,6 +96,7 @@ export function ProjectWorkspace() {
     setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
     setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
     setPendingMutations(Array.isArray(pendingRows) ? pendingRows : []);
+    setMutationTimeline(Array.isArray(mutationTimelineRows) ? mutationTimelineRows : []);
     setLastSync(new Date().toISOString());
   };
 
@@ -155,6 +158,19 @@ export function ProjectWorkspace() {
   }, [runtimeMetrics, pm2Processes, onlinePm2Count, activeBinding]);
 
   const unifiedTimeline = useMemo(() => {
+    if (mutationTimeline.length > 0) {
+      const rows = mutationTimeline.map((row: any, idx: number) => ({
+        id: row?.correlationId || `mutation-${idx}`,
+        type: row?.source || 'mutation',
+        title: row?.title || row?.stage || 'Runtime Mutation',
+        message: row?.message || '',
+        status: row?.status || 'UNKNOWN',
+        timestamp: row?.timestamp || null,
+      }));
+      if (timelineFilter === 'all') return rows.slice(0, 120);
+      return rows.filter((row) => row.type === timelineFilter).slice(0, 120);
+    }
+
     const runtimeRows = runtimeEvents.map((row: any, idx: number) => ({
       id: `runtime-${row?.id || idx}`,
       type: 'runtime' as const,
@@ -196,7 +212,7 @@ export function ProjectWorkspace() {
 
     if (timelineFilter === 'all') return rows.slice(0, 120);
     return rows.filter((row) => row.type === timelineFilter).slice(0, 120);
-  }, [runtimeEvents, deployments, recoveries, governanceEvents, timelineFilter]);
+  }, [mutationTimeline, runtimeEvents, deployments, recoveries, governanceEvents, timelineFilter]);
 
   const terminalContext = useMemo(() => `${project?.name || 'runtime'}:${project?.runtime_path || '.'}`, [project]);
 
@@ -235,7 +251,7 @@ export function ProjectWorkspace() {
     if (!project) return;
     const runtimeId = String(project?.runtime_id || project?.id || '');
     try {
-      const result = await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'RuntimeOperator', `Decision from workspace: ${status}`);
+      const result = await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'Admin', `Decision from workspace: ${status}`);
       if (!result?.success) {
         setOperationNotice({ type: 'error', message: result?.message || 'فشل تحديث الموافقة التشغيلية' });
         return;
@@ -402,7 +418,7 @@ export function ProjectWorkspace() {
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Unified Runtime Timeline</p>
               <div className="flex items-center gap-1">
-                {(['all', 'runtime', 'deploy', 'recovery', 'governance'] as const).map((f) => (
+                {(['all', 'approval', 'mutation', 'deploy', 'recovery'] as const).map((f) => (
                   <button
                     key={f}
                     onClick={() => setTimelineFilter(f)}
@@ -477,6 +493,7 @@ export function ProjectWorkspace() {
                     <div key={row.id} className="rounded-md border border-slate-200 dark:border-white/10 p-2">
                       <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.operation_type || 'operation'}</p>
                       <p className="text-[10px] text-slate-500">{row.id} | Risk: {row.risk_level || 'N/A'}</p>
+                      <p className="text-[10px] text-slate-500">Stage: {Number(row.stage_index || 1)} / {Number(row.total_stages || 1)} | Role: {row.required_role || 'Admin'}</p>
                       <div className="mt-1.5 flex items-center gap-1">
                         <button onClick={() => handleApprovalDecision(row.id, 'APPROVED')} className="px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">Approve</button>
                         <button onClick={() => handleApprovalDecision(row.id, 'REJECTED')} className="px-2 py-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-[10px] font-bold">Reject</button>

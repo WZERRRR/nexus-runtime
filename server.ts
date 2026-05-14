@@ -351,6 +351,12 @@ try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN execution_
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN last_result_json TEXT`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN executed_at DATETIME`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN replay_count INTEGER DEFAULT 0`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN stage_index INTEGER DEFAULT 1`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN total_stages INTEGER DEFAULT 1`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN required_role TEXT DEFAULT 'Admin'`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN sla_minutes INTEGER DEFAULT 60`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN expires_at DATETIME`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN chain_status TEXT DEFAULT 'PENDING_STAGE'`); } catch {}
 
 function governanceError(res: any, status: number, message: string, errorCode: string, extra?: Record<string, any>) {
   return res.status(status).json({ success: false, message, error_code: errorCode, ...(extra || {}) });
@@ -359,6 +365,28 @@ function governanceError(res: any, status: number, message: string, errorCode: s
 function canReplayByRole(role: string) {
   const normalized = String(role || '').trim().toLowerCase();
   return normalized === 'admin' || normalized === 'super admin' || normalized === 'super_admin';
+}
+
+function deriveApprovalChain(operationType: string, riskLevel: string) {
+  const op = String(operationType || '').toLowerCase();
+  const risk = String(riskLevel || '').toLowerCase();
+  const risky = risk === 'high' || risk === 'critical' || op.includes('deploy') || op.includes('recovery') || op.includes('rollback');
+  if (risky) {
+    return {
+      totalStages: 2,
+      stage1: { role: 'Admin', slaMinutes: 30 },
+      stage2: { role: 'Super Admin', slaMinutes: 20 }
+    };
+  }
+  return {
+    totalStages: 1,
+    stage1: { role: 'Admin', slaMinutes: 60 },
+    stage2: null as any
+  };
+}
+
+function computeExpiryIso(slaMinutes: number) {
+  return new Date(Date.now() + Math.max(1, Number(slaMinutes || 60)) * 60_000).toISOString();
 }
 
 function beginGovernedMutation(mutationId: string) {
@@ -1674,11 +1702,137 @@ async function startServer() {
     }
   });
 
+  app.get("/api/runtime/:id/mutation-timeline", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const limit = Math.min(300, Math.max(20, Number(req.query.limit || 160)));
+
+      const approvals = sqliteDb.prepare(`
+        SELECT id, operation_type, approval_status, chain_status, stage_index, total_stages, required_role, requested_by, reviewed_by, risk_level, requested_at, reviewed_at
+        FROM runtime_approvals
+        WHERE runtime_id = ?
+        ORDER BY requested_at DESC
+        LIMIT ?
+      `).all(runtimeId, limit) as any[];
+
+      const pending = sqliteDb.prepare(`
+        SELECT approval_id, mutation_id, mutation_kind, execution_status, created_at, executed_at
+        FROM runtime_pending_mutations
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(runtimeId, limit) as any[];
+
+      const deploys = sqliteDb.prepare(`
+        SELECT deployment_id, deploy_status, deploy_strategy, risk_level, created_at, executed_at
+        FROM runtime_locks
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(runtimeId, Math.min(limit, 100)) as any[];
+
+      const recoveries = sqliteDb.prepare(`
+        SELECT recovery_id, snapshot_id, recovery_status, recovery_type, risk_level, created_at
+        FROM runtime_recovery
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(runtimeId, Math.min(limit, 100)) as any[];
+
+      const approvalById = new Map<string, any>();
+      approvals.forEach((a) => approvalById.set(String(a.id), a));
+
+      const rows: any[] = [];
+      approvals.forEach((a) => {
+        rows.push({
+          correlationId: String(a.id),
+          mutationId: null,
+          source: 'approval',
+          title: `Approval ${a.operation_type || ''}`.trim(),
+          stage: `Stage ${Number(a.stage_index || 1)}/${Number(a.total_stages || 1)}`,
+          status: String(a.approval_status || 'PENDING'),
+          chainStatus: String(a.chain_status || 'PENDING_STAGE'),
+          requiredRole: a.required_role || 'Admin',
+          riskLevel: a.risk_level || 'medium',
+          message: `Requested by ${a.requested_by || 'RuntimeOperator'}`,
+          timestamp: a.reviewed_at || a.requested_at || null
+        });
+      });
+
+      pending.forEach((m) => {
+        const ap = approvalById.get(String(m.approval_id));
+        rows.push({
+          correlationId: String(m.approval_id || m.mutation_id || ''),
+          mutationId: m.mutation_id || null,
+          source: 'mutation',
+          title: `Mutation ${m.mutation_kind || ''}`.trim(),
+          stage: 'Execution',
+          status: String(m.execution_status || 'PENDING'),
+          chainStatus: ap?.chain_status || null,
+          requiredRole: ap?.required_role || null,
+          riskLevel: ap?.risk_level || 'medium',
+          message: m.mutation_id || '',
+          timestamp: m.executed_at || m.created_at || null
+        });
+      });
+
+      deploys.forEach((d) => {
+        rows.push({
+          correlationId: String(d.deployment_id || ''),
+          mutationId: null,
+          source: 'deploy',
+          title: 'Deploy Pipeline',
+          stage: d.deploy_strategy || 'governed_deploy',
+          status: String(d.deploy_status || 'UNKNOWN'),
+          chainStatus: null,
+          requiredRole: null,
+          riskLevel: d.risk_level || 'medium',
+          message: d.deployment_id || '',
+          timestamp: d.executed_at || d.created_at || null
+        });
+      });
+
+      recoveries.forEach((r) => {
+        rows.push({
+          correlationId: String(r.recovery_id || ''),
+          mutationId: null,
+          source: 'recovery',
+          title: 'Recovery / Rollback',
+          stage: r.recovery_type || 'rollback',
+          status: String(r.recovery_status || 'UNKNOWN'),
+          chainStatus: null,
+          requiredRole: null,
+          riskLevel: r.risk_level || 'medium',
+          message: r.snapshot_id ? `Snapshot ${r.snapshot_id}` : (r.recovery_id || ''),
+          timestamp: r.created_at || null
+        });
+      });
+
+      rows.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      res.json({ success: true, data: rows.slice(0, limit) });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Mutation timeline fetch failed' });
+    }
+  });
+
   app.post("/api/runtime/:id/approvals", async (req, res) => {
     try {
       const runtime_id = req.params.id;
       const { operation_type, requested_by, risk_level, approval_reason } = req.body;
-      const id = await RuntimeApproval.requestApproval({ runtime_id, operation_type, requested_by, risk_level, approval_reason });
+      const chain = deriveApprovalChain(String(operation_type || ''), String(risk_level || 'medium'));
+      const id = await RuntimeApproval.requestApproval({
+        runtime_id,
+        operation_type,
+        requested_by,
+        risk_level,
+        approval_reason,
+        stage_index: 1,
+        total_stages: chain.totalStages,
+        required_role: chain.stage1.role,
+        sla_minutes: chain.stage1.slaMinutes,
+        expires_at: computeExpiryIso(chain.stage1.slaMinutes),
+        chain_status: chain.totalStages > 1 ? 'PENDING_STAGE' : 'PENDING_FINAL'
+      });
       res.json({ success: true, data: { id } });
     } catch (e) {
       res.status(500).json({ success: false, message: 'Approval request failed' });
@@ -1688,18 +1842,51 @@ async function startServer() {
   app.put("/api/runtime/:id/approvals/:approvalId", async (req, res) => {
     try {
       const { status, reviewed_by, reason } = req.body;
-      await RuntimeApproval.updateApproval(req.params.approvalId, status, reviewed_by, reason);
+      const approvalId = String(req.params.approvalId);
+      const runtimeId = String(req.params.id);
+      const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+      if (!approval) return governanceError(res, 404, 'Approval not found', 'APPROVAL_NOT_FOUND');
+      if (approval.expires_at && Date.now() > new Date(String(approval.expires_at)).getTime()) {
+        sqliteDb.prepare('UPDATE runtime_approvals SET approval_status = ?, chain_status = ? WHERE id = ?').run('EXPIRED', 'EXPIRED', approvalId);
+        return governanceError(res, 410, 'Approval has expired', 'APPROVAL_EXPIRED');
+      }
+
       const normalizedStatus = String(status || '').toUpperCase();
+      const totalStages = Math.max(1, Number(approval.total_stages || 1));
+      const currentStage = Math.max(1, Number(approval.stage_index || 1));
+      const requiredRole = String(approval.required_role || 'Admin').toLowerCase();
+      const reviewerRole = String(reviewed_by || '').toLowerCase();
+      if (normalizedStatus === 'APPROVED' && requiredRole && reviewerRole && !reviewerRole.includes(requiredRole)) {
+        return governanceError(res, 403, `Reviewer role does not satisfy required role ${approval.required_role}`, 'APPROVAL_ROLE_MISMATCH');
+      }
+
+      await RuntimeApproval.updateApproval(approvalId, status, reviewed_by, reason);
+
+      if (normalizedStatus === 'APPROVED' && currentStage < totalStages) {
+        const nextStage = currentStage + 1;
+        const nextRole = nextStage >= totalStages ? 'Super Admin' : 'Admin';
+        const nextSla = nextStage >= totalStages ? 20 : 30;
+        sqliteDb.prepare(`
+          UPDATE runtime_approvals
+          SET approval_status = ?, chain_status = ?, stage_index = ?, required_role = ?, sla_minutes = ?, expires_at = ?, reviewed_at = NULL, reviewed_by = NULL
+          WHERE id = ?
+        `).run('PENDING', 'PENDING_STAGE', nextStage, nextRole, nextSla, computeExpiryIso(nextSla), approvalId);
+        addRuntimeLog('warning', `Approval ${approvalId} advanced to stage ${nextStage}/${totalStages} requiring ${nextRole}`, 'governance_runtime');
+        return res.json({ success: true, data: { orchestration: null, stageAdvanced: true, stageIndex: nextStage, totalStages } });
+      }
+
+      sqliteDb.prepare('UPDATE runtime_approvals SET chain_status = ? WHERE id = ?')
+        .run(normalizedStatus === 'APPROVED' ? 'APPROVED_FINAL' : normalizedStatus === 'REJECTED' ? 'REJECTED' : 'PENDING_STAGE', approvalId);
       if (normalizedStatus === 'APPROVED') {
-        const pending = getPendingMutationByApprovalId(req.params.approvalId);
+        const pending = getPendingMutationByApprovalId(approvalId);
         if (pending) {
           const executionResult = await executeApprovedMutation(pending);
-          updatePendingMutationExecution(req.params.approvalId, executionResult.success ? 'COMPLETED' : 'FAILED', executionResult);
+          updatePendingMutationExecution(approvalId, executionResult.success ? 'COMPLETED' : 'FAILED', executionResult);
           addRuntimeLog(
             executionResult.success ? 'success' : 'error',
             executionResult.success
-              ? `Approval ${req.params.approvalId} executed mutation ${pending.mutationId}`
-              : `Approval ${req.params.approvalId} execution failed for mutation ${pending.mutationId}`,
+              ? `Approval ${approvalId} executed mutation ${pending.mutationId}`
+              : `Approval ${approvalId} execution failed for mutation ${pending.mutationId}`,
             'governance_runtime'
           );
           return res.json({ success: true, data: { orchestration: executionResult, mutationId: pending.mutationId } });

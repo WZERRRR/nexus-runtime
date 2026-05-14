@@ -30,6 +30,12 @@ export interface RuntimeApprovalRecord {
   requested_at: string;
   reviewed_at?: string;
   reviewed_by?: string;
+  stage_index?: number;
+  total_stages?: number;
+  required_role?: string;
+  sla_minutes?: number;
+  expires_at?: string;
+  chain_status?: string;
 }
 
 export class RuntimeApproval {
@@ -43,14 +49,37 @@ export class RuntimeApproval {
         requested_by: string;
         risk_level: string;
         approval_reason: string;
+        stage_index?: number;
+        total_stages?: number;
+        required_role?: string;
+        sla_minutes?: number;
+        expires_at?: string;
+        chain_status?: string;
     }): Promise<string> {
         const seed = `${record.runtime_id}:${record.operation_type}:${record.requested_by}:${Date.now()}`;
         const id = `APPR-${createHash('sha1').update(seed).digest('hex').slice(0, 10).toUpperCase()}`;
         const stmt = db.prepare(`
-            INSERT INTO runtime_approvals (id, runtime_id, operation_type, requested_by, approval_status, risk_level, approval_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO runtime_approvals (
+              id, runtime_id, operation_type, requested_by, approval_status, risk_level, approval_reason,
+              stage_index, total_stages, required_role, sla_minutes, expires_at, chain_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
-        stmt.run(id, record.runtime_id, record.operation_type, record.requested_by, ApprovalStatus.PENDING, record.risk_level, record.approval_reason);
+        stmt.run(
+          id,
+          record.runtime_id,
+          record.operation_type,
+          record.requested_by,
+          ApprovalStatus.PENDING,
+          record.risk_level,
+          record.approval_reason,
+          record.stage_index ?? 1,
+          record.total_stages ?? 1,
+          record.required_role ?? 'Admin',
+          record.sla_minutes ?? 60,
+          record.expires_at || null,
+          record.chain_status ?? 'PENDING_STAGE'
+        );
         return id;
     }
 
