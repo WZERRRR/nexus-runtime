@@ -51,19 +51,6 @@ export class RuntimeFilesystem {
     `);
     
     const files = fs.readdirSync(targetPath);
-    
-    // Auto-provision README if root is empty to prevent "False Empty State" confusion
-    if (files.length === 0 && (requestPath === '' || requestPath === '.' || targetPath === baseRuntimePath)) {
-        const readmePath = path.join(targetPath, 'README.md');
-        const readmeContent = `# Nexus Runtime Workspace\n\nThis directory was synchronized at ${new Date().toISOString()}.\n\n### Status\n- Filesystem Trace: SUCCESS\n- Directory Binding: OPERATIONAL\n- Content: Initialized`;
-        try {
-            fs.writeFileSync(readmePath, readmeContent);
-            console.log(`[RuntimeFilesystem] Auto-provisioned README for empty root: ${readmePath}`);
-            files.push('README.md'); 
-        } catch (e) {
-            console.error(`[RuntimeFilesystem] Failed to auto-provision README:`, e);
-        }
-    }
 
     console.log(`[RuntimeFilesystem] Sync Completed [${runtime_id}]:
       entries_count: ${files.length}

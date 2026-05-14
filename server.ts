@@ -1574,6 +1574,22 @@ async function startServer() {
     return normalizedTarget;
   };
 
+  const SENSITIVE_RUNTIME_FILES = new Set([
+    '.env',
+    'credentials.json',
+    'id_rsa'
+  ]);
+
+  const isSensitiveRuntimeFile = (targetPath: string) => {
+    const fileName = path.basename(targetPath).toLowerCase();
+    return SENSITIVE_RUNTIME_FILES.has(fileName) || fileName.endsWith('.pem') || fileName.endsWith('.key');
+  };
+
+  const auditSensitiveFileAccess = (action: string, targetPath: string, status: 'BLOCKED' | 'MASKED') => {
+    addGovernanceAction(action, 'Runtime', targetPath, status);
+    addRuntimeLog('warning', `Sensitive file governance ${status.toLowerCase()}: ${targetPath}`, 'security_runtime');
+  };
+
   // ==========================================
   // INFRASTRUCTURE GLOBAL FILESYSTEM APIs
   // ==========================================
@@ -1924,20 +1940,8 @@ async function startServer() {
 
     try {
         if (!fs.existsSync(absolutePath)) {
-            // Auto-provision path if requested path is the root of a project
-            if (requestedPath === "." || requestedPath === projectRoot || requestedPath === "/") {
-                console.log(`[Runtime Explorer] Auto-provisioning missing root path: ${absolutePath}`);
-                try {
-                    fs.mkdirSync(absolutePath, { recursive: true });
-                    // Seed initial file so explorer is not empty
-                    fs.writeFileSync(path.join(absolutePath, 'README.md'), `# Nexus Runtime Workspace\n\nThis workspace was automatically provisioned for project context resolution.\n\n### Status\n- Ready for operational input.`);
-                } catch (e) {
-                    console.error(`[Runtime Explorer] Failed to create directory ${absolutePath}:`, e);
-                }
-            } else {
-                console.error(`[Runtime Explorer] PATH NOT FOUND: ${absolutePath}`);
-                return res.status(404).json({ success: false, message: `Path not found: ${absolutePath}` });
-            }
+            console.error(`[Runtime Explorer] PATH NOT FOUND: ${absolutePath}`);
+            return res.status(404).json({ success: false, message: `Path not found: ${absolutePath}` });
         }
         
         const stats = fs.statSync(absolutePath);
@@ -1965,6 +1969,7 @@ async function startServer() {
                       path.join(requestedPath, item.name),
                 size,
                 modified: mtime,
+                isSensitive: item.isFile() ? isSensitiveRuntimeFile(path.join(absolutePath, item.name)) : false,
             };
         });
         res.json({ success: true, data: list });
@@ -1995,6 +2000,10 @@ async function startServer() {
         if (stats.isDirectory()) {
           return res.status(400).json({ success: false, message: "FILESYSTEM_TYPE_MISMATCH: Cannot read a directory as a file." });
         }
+        if (isSensitiveRuntimeFile(absolutePath)) {
+          auditSensitiveFileAccess('SENSITIVE_FILE_READ', filePath, 'MASKED');
+          return res.json({ success: true, data: "*** MASKED SENSITIVE FILE ***", masked: true });
+        }
         const content = fs.readFileSync(absolutePath, 'utf8');
         res.json({ success: true, data: content });
     } catch (err: any) {
@@ -2018,6 +2027,10 @@ async function startServer() {
     const absolutePath = getSafePath(filePath, projectRoot);
 
     try {
+        if (isSensitiveRuntimeFile(absolutePath)) {
+            auditSensitiveFileAccess('SENSITIVE_FILE_WRITE', filePath, 'BLOCKED');
+            return res.status(403).json({ success: false, message: "Sensitive file write is blocked by governance." });
+        }
         fs.writeFileSync(absolutePath, content, 'utf8');
         addGovernanceAction('FILE_WRITE', 'Runtime', filePath, 'COMPLETED');
         addRuntimeLog('info', `File system write in ${projectRoot || 'Global'}: ${filePath}`, 'file_runtime');
@@ -2041,8 +2054,12 @@ async function startServer() {
     if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths array required" });
 
     try {
-        paths.forEach(p => {
+        for (const p of paths) {
             const absolutePath = getSafePath(p, projectRoot);
+            if (isSensitiveRuntimeFile(absolutePath)) {
+                auditSensitiveFileAccess('SENSITIVE_FILE_DELETE', p, 'BLOCKED');
+                return res.status(403).json({ success: false, message: "Sensitive file delete is blocked by governance." });
+            }
             if (fs.existsSync(absolutePath)) {
                 const stats = fs.statSync(absolutePath);
                 if (stats.isDirectory()) {
@@ -2053,7 +2070,7 @@ async function startServer() {
                 addGovernanceAction('FILE_DELETE', 'Runtime', p, 'COMPLETED');
                 addRuntimeLog('warn', `Infrastructure component wiped in ${projectRoot || 'Global'}: ${p}`, 'file_runtime');
             }
-        });
+        }
         res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
@@ -2105,6 +2122,10 @@ async function startServer() {
     const absolutePath = getSafePath(fullPath, projectRoot);
     
     try {
+        if (isSensitiveRuntimeFile(absolutePath)) {
+            auditSensitiveFileAccess('SENSITIVE_FILE_UPLOAD', fullPath, 'BLOCKED');
+            return res.status(403).json({ success: false, message: "Sensitive file upload is blocked by governance." });
+        }
         fs.writeFileSync(absolutePath, content, 'utf8');
         addGovernanceAction('FILE_UPLOAD', 'Runtime', fullPath, 'COMPLETED');
         addRuntimeLog('info', `File uploaded to ${projectRoot || 'Global'}: ${fullPath}`, 'file_runtime');

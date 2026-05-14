@@ -12,31 +12,6 @@ export function setupDomainsApi(app: any, addRuntimeLog: any) {
     if (!fs.existsSync(confDir)) {
       fs.mkdirSync(confDir, { recursive: true });
     }
-    const files = fs.readdirSync(confDir);
-    if (files.length === 0) {
-      // Seed initial mock data into the filesystem
-      const mockSites = [
-        { name: 'dev.linkpro-sa.com', type: 'Node.js', port: 3000 },
-        { name: 'linkpro-sa.com', type: 'Static', hasSSL: true },
-        { name: 'site.tcore.site', type: 'Static', hasSSL: true },
-        { name: 'tcore.site', type: 'Static' },
-        { name: '187.124.190.79', type: 'Static' }
-      ];
-      for (const site of mockSites) {
-        let confBody = `server {\n    listen 80;\n`;
-        if (site.hasSSL) {
-           confBody += `    listen 443 ssl http2;\n    ssl_certificate /etc/letsencrypt/live/${site.name}/fullchain.pem;\n    ssl_certificate_key /etc/letsencrypt/live/${site.name}/privkey.pem;\n`;
-        }
-        confBody += `    server_name ${site.name};\n`;
-        if (site.type === 'Node.js') {
-           confBody += `\n    location / {\n        proxy_pass http://127.0.0.1:${site.port};\n    }\n}`;
-        } else {
-           confBody += `    root /www/wwwroot/${site.name};\n    index index.html index.htm;\n\n    location / {\n        try_files $uri $uri/ =404;\n    }\n}`;
-        }
-        fs.writeFileSync(getConfPath(site.name), confBody);
-      }
-    }
-    
     const currentFiles = fs.readdirSync(confDir);
     const sites = [];
     let idCounter = 1;
@@ -57,8 +32,6 @@ export function setupDomainsApi(app: any, addRuntimeLog: any) {
       const backupMatch = content.match(/# backupCount: (\d+)/);
       const backupCount = backupMatch ? parseInt(backupMatch[1], 10) : 0;
       
-      const requests = Math.floor(Math.random() * 50000);
-      
       sites.push({
         id: idCounter++,
         name,
@@ -67,10 +40,10 @@ export function setupDomainsApi(app: any, addRuntimeLog: any) {
         backupCount,
         phpVersion: type,
         expiration: 'Perpetual',
-        sslDays: hasSSL ? (Math.floor(Math.random() * 30) + 30) : null,
-        requests, 
+        sslDays: null,
+        requests: null,
         waf: true,
-        history: Array.from({length: 20}, () => ({ value: Math.floor(Math.random() * 100) }))
+        history: []
       });
     }
     // Reverse so new items appear at top
