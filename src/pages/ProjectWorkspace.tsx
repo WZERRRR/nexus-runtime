@@ -34,30 +34,49 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.Rea
   { id: 'recovery', label: 'Recovery', icon: <LifeBuoy className="w-4 h-4" />, route: '/backup' },
 ];
 
+type TimelineFilter = 'all' | 'runtime' | 'deploy' | 'recovery' | 'governance';
+
 export function ProjectWorkspace() {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [project, setProject] = useState<any>(null);
   const [environmentBindings, setEnvironmentBindings] = useState<any[]>([]);
   const [pm2Processes, setPm2Processes] = useState<any[]>([]);
   const [runtimeMetrics, setRuntimeMetrics] = useState<any>(null);
   const [runtimeLogs, setRuntimeLogs] = useState<any[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<any[]>([]);
+  const [deployments, setDeployments] = useState<any[]>([]);
+  const [recoveries, setRecoveries] = useState<any[]>([]);
+  const [governanceEvents, setGovernanceEvents] = useState<any[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
+
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+
+  const [terminalInput, setTerminalInput] = useState('');
+  const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
+  const [terminalRunning, setTerminalRunning] = useState(false);
+
   const inFlightRef = useRef(false);
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
       runtimeAPI.getLogs(runtimeId).catch(() => []),
       runtimeAPI.getEvents(runtimeId, 40).catch(() => []),
+      runtimeAPI.getRuntimeDeployments(runtimeId).catch(() => []),
+      runtimeAPI.getRuntimeRecoveries(runtimeId).catch(() => []),
+      runtimeAPI.getGovernanceActions().catch(() => []),
     ]);
 
     setEnvironmentBindings(Array.isArray(envs) ? envs : []);
@@ -65,6 +84,9 @@ export function ProjectWorkspace() {
     setRuntimeMetrics(metrics || null);
     setRuntimeLogs(Array.isArray(logs) ? logs : []);
     setRuntimeEvents(Array.isArray(events) ? events : []);
+    setDeployments(Array.isArray(deployRows) ? deployRows : []);
+    setRecoveries(Array.isArray(recoveryRows) ? recoveryRows : []);
+    setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
     setLastSync(new Date().toISOString());
   };
 
@@ -107,27 +129,16 @@ export function ProjectWorkspace() {
         inFlightRef.current = false;
       }
     }, 15000);
-
     return () => clearInterval(timer);
   }, [project]);
 
-  const runtimeStatus = useMemo(() => {
-    if (!project) return 'UNKNOWN';
-    return String(project.status || 'unknown').toUpperCase();
-  }, [project]);
+  const runtimeStatus = useMemo(() => String(project?.status || 'unknown').toUpperCase(), [project]);
 
-  const healthyBindings = useMemo(
-    () => environmentBindings.filter((item) => item?.validated).length,
-    [environmentBindings]
-  );
+  const healthyBindings = useMemo(() => environmentBindings.filter((item) => item?.validated).length, [environmentBindings]);
 
-  const activeBinding = useMemo(() => {
-    return environmentBindings.find((item) => item?.validated) || environmentBindings[0] || null;
-  }, [environmentBindings]);
+  const activeBinding = useMemo(() => environmentBindings.find((item) => item?.validated) || environmentBindings[0] || null, [environmentBindings]);
 
-  const onlinePm2Count = useMemo(() => {
-    return pm2Processes.filter((p) => String(p?.status || '').toLowerCase() === 'online').length;
-  }, [pm2Processes]);
+  const onlinePm2Count = useMemo(() => pm2Processes.filter((p) => String(p?.status || '').toLowerCase() === 'online').length, [pm2Processes]);
 
   const healthLabel = useMemo(() => {
     if (!runtimeMetrics && pm2Processes.length === 0) return 'UNKNOWN';
@@ -136,10 +147,51 @@ export function ProjectWorkspace() {
     return 'HEALTHY';
   }, [runtimeMetrics, pm2Processes, onlinePm2Count, activeBinding]);
 
-  const runtimeFeed = useMemo(() => {
-    const merged = [...runtimeEvents, ...runtimeLogs];
-    return merged.slice(0, 40);
-  }, [runtimeEvents, runtimeLogs]);
+  const unifiedTimeline = useMemo(() => {
+    const runtimeRows = runtimeEvents.map((row: any, idx: number) => ({
+      id: `runtime-${row?.id || idx}`,
+      type: 'runtime' as const,
+      title: row?.event_type || row?.type || 'Runtime Event',
+      message: row?.message || row?.event || '',
+      status: row?.severity || row?.level || 'info',
+      timestamp: row?.created_at || row?.timestamp || null,
+    }));
+
+    const deployRows = deployments.map((row: any, idx: number) => ({
+      id: `deploy-${row?.id || row?.deployment_id || idx}`,
+      type: 'deploy' as const,
+      title: row?.deploy_strategy || 'Deploy',
+      message: row?.deploy_status || row?.status || 'unknown',
+      status: row?.risk_level || row?.deploy_status || 'info',
+      timestamp: row?.created_at || row?.updated_at || row?.timestamp || null,
+    }));
+
+    const recoveryRows = recoveries.map((row: any, idx: number) => ({
+      id: `recovery-${row?.recovery_id || row?.id || idx}`,
+      type: 'recovery' as const,
+      title: row?.recovery_type || 'Recovery',
+      message: row?.recovery_status || row?.status || 'unknown',
+      status: row?.risk_level || row?.recovery_status || 'info',
+      timestamp: row?.created_at || row?.updated_at || row?.timestamp || null,
+    }));
+
+    const governanceRows = governanceEvents.map((row: any, idx: number) => ({
+      id: `gov-${row?.id || idx}`,
+      type: 'governance' as const,
+      title: row?.action_type || row?.event_type || 'Governance Action',
+      message: row?.target || row?.details || row?.status || '',
+      status: row?.status || 'info',
+      timestamp: row?.created_at || row?.timestamp || null,
+    }));
+
+    const rows = [...runtimeRows, ...deployRows, ...recoveryRows, ...governanceRows]
+      .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+
+    if (timelineFilter === 'all') return rows.slice(0, 120);
+    return rows.filter((row) => row.type === timelineFilter).slice(0, 120);
+  }, [runtimeEvents, deployments, recoveries, governanceEvents, timelineFilter]);
+
+  const terminalContext = useMemo(() => `${project?.name || 'runtime'}:${project?.runtime_path || '.'}`, [project]);
 
   const handleRefresh = async () => {
     if (!project || isRefreshing) return;
@@ -151,36 +203,61 @@ export function ProjectWorkspace() {
     }
   };
 
+  const handleTerminalCommand = async () => {
+    const cmd = terminalInput.trim();
+    if (!cmd || terminalRunning || !project) return;
+    setTerminalRunning(true);
+    setTerminalOutput((prev) => [...prev, `> ${cmd}`]);
+    setTerminalInput('');
+    try {
+      const res = await runtimeAPI.executeTerminalCommand(cmd, project.runtime_path || undefined, project.id);
+      if (res?.success && res.data) {
+        if (res.data.stdout) setTerminalOutput((prev) => [...prev, res.data!.stdout]);
+        if (res.data.stderr) setTerminalOutput((prev) => [...prev, res.data!.stderr]);
+      } else {
+        setTerminalOutput((prev) => [...prev, res?.message || 'لا توجد بيانات تشغيلية حالياً']);
+      }
+    } catch {
+      setTerminalOutput((prev) => [...prev, 'خطأ أثناء تنفيذ الأمر']);
+    } finally {
+      setTerminalRunning(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-slate-400 text-sm">جاري تحميل Runtime Workspace...</div>;
   }
 
   if (error || !project) {
     return (
-      <div className="glass-panel rounded-2xl p-8 border border-slate-200 dark:border-slate-800/50">
+      <div className="glass-panel rounded-xl p-6 border border-slate-200 dark:border-slate-800/50">
         <p className="text-red-400 font-bold">{error || 'تعذر تحميل المشروع'}</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 pb-8">
-      <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4 md:p-5">
+    <div className="space-y-3 pb-6 text-right" dir="rtl">
+      <div className="glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3 md:p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500 mb-1">Runtime Project Workspace</p>
-            <h1 className="text-xl md:text-2xl font-black text-white">{project.name}</h1>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Operational Runtime IDE Workspace</p>
+            <h1 className="text-lg md:text-xl font-black text-white">{project.name}</h1>
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="px-4 py-2 rounded-lg border border-slate-200 dark:border-white/10 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60"
-          >
-            {isRefreshing ? 'Refreshing...' : 'Refresh Runtime'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setLeftCollapsed((v) => !v)} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/50">
+              {leftCollapsed ? 'إظهار الوحدات' : 'طي الوحدات'}
+            </button>
+            <button onClick={() => setRightCollapsed((v) => !v)} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/50">
+              {rightCollapsed ? 'إظهار المراقبة' : 'طي المراقبة'}
+            </button>
+            <button onClick={handleRefresh} disabled={isRefreshing} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/50 disabled:opacity-60">
+              {isRefreshing ? 'تحديث...' : 'تحديث'}
+            </button>
+          </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 text-xs">
+        <div className="mt-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-1.5 text-[11px]">
           <MetricCard label="Runtime Status" value={runtimeStatus} />
           <MetricCard label="Runtime Health" value={healthLabel} />
           <MetricCard label="Runtime Type" value={project.type || project.runtime_type || 'N/A'} />
@@ -192,34 +269,34 @@ export function ProjectWorkspace() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <div className="xl:col-span-2 glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-3 h-fit">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Operational Modules</p>
-          <div className="space-y-1">
-            {WORKSPACE_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  if (tab.id !== 'overview' && tab.route) {
-                    navigate(tab.route, { state: { project } });
-                  }
-                }}
-                className={`w-full px-3 py-2 rounded-lg border text-xs font-bold flex items-center gap-2 transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
-                    : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
+      <div className={`grid grid-cols-1 gap-3 ${leftCollapsed && rightCollapsed ? 'xl:grid-cols-1' : leftCollapsed || rightCollapsed ? 'xl:grid-cols-10' : 'xl:grid-cols-12'}`}>
+        {!leftCollapsed && (
+          <div className="xl:col-span-2 glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-2 h-fit">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Operational Modules</p>
+            <div className="space-y-1">
+              {WORKSPACE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    if (tab.id !== 'overview' && tab.route) navigate(tab.route, { state: { project } });
+                  }}
+                  className={`w-full px-3 py-2 rounded-lg border text-xs font-bold flex items-center gap-2 transition-colors ${
+                    activeTab === tab.id
+                      ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
+                      : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="xl:col-span-7 space-y-4">
-          <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4">
+        <div className={`${leftCollapsed && rightCollapsed ? 'xl:col-span-1' : leftCollapsed || rightCollapsed ? 'xl:col-span-7' : 'xl:col-span-7'} space-y-3`}>
+          <div className="glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-3">Active Workspace</p>
             {activeTab === 'overview' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -268,38 +345,75 @@ export function ProjectWorkspace() {
             )}
           </div>
 
-          <div className="glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4">
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Runtime Events / Logs</p>
-            <div className="space-y-2 max-h-56 overflow-auto pr-1">
-              {runtimeFeed.map((item: any, idx: number) => (
-                <div key={`${item?.id || idx}-${item?.timestamp || idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 bg-white dark:bg-slate-900/40">
-                  <p className="text-[11px] text-slate-500">{item?.timestamp || 'N/A'}</p>
-                  <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{item?.type || item?.level || 'event'}</p>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 truncate">{item?.message || item?.title || 'N/A'}</p>
+          <div className="glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Unified Runtime Timeline</p>
+              <div className="flex items-center gap-1">
+                {(['all', 'runtime', 'deploy', 'recovery', 'governance'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setTimelineFilter(f)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold border ${
+                      timelineFilter === f
+                        ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
+                        : 'border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5 max-h-64 overflow-auto pr-1">
+              {unifiedTimeline.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300 font-bold">لا توجد بيانات تشغيلية حالياً</p>
+              ) : unifiedTimeline.map((item) => (
+                <div key={`${item.id}-${item.timestamp}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 bg-white dark:bg-slate-900/40">
+                  <p className="text-[11px] text-slate-500">{item.timestamp || 'N/A'}</p>
+                  <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{item.type} · {item.title}</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 truncate">{item.message || 'N/A'}</p>
                 </div>
               ))}
-              {runtimeFeed.length === 0 && (
-                <p className="text-sm text-slate-600 dark:text-slate-300 font-bold">لا توجد بيانات تشغيلية حالياً</p>
-              )}
+            </div>
+          </div>
+
+          <div className="glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3 bg-[#080c14]">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Persistent Runtime Terminal</p>
+              <span className="text-[10px] text-slate-500">Context: {terminalContext}</span>
+            </div>
+            <div className="h-36 overflow-auto rounded-lg border border-white/10 bg-black/30 p-2 font-mono text-[11px] text-slate-200">
+              {terminalOutput.length === 0 ? <p className="text-slate-500">لا توجد بيانات تشغيلية حالياً</p> : terminalOutput.map((line, idx) => <p key={`${line}-${idx}`} className="whitespace-pre-wrap break-words">{line}</p>)}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={terminalInput}
+                onChange={(e) => setTerminalInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleTerminalCommand()}
+                placeholder="أدخل أمر تشغيلي ضمن سياق المشروع"
+                className="flex-1 rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-xs text-slate-100 outline-none"
+              />
+              <button onClick={handleTerminalCommand} disabled={terminalRunning} className="px-3 py-2 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-300 text-xs font-bold disabled:opacity-60">
+                {terminalRunning ? 'تنفيذ...' : 'تنفيذ'}
+              </button>
             </div>
           </div>
         </div>
 
-        <div className="xl:col-span-3 glass-panel rounded-2xl border border-slate-200 dark:border-slate-800/50 p-4 h-fit">
-          <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Runtime Intelligence</p>
-          <div className="space-y-2">
-            <MetricPanel label="Runtime Health" value={healthLabel} />
-            <MetricPanel label="PM2 Stability" value={`${onlinePm2Count} / ${pm2Processes.length} online`} />
-            <MetricPanel label="Infrastructure State" value={activeBinding?.nginxBinding ? 'Bound' : 'Unbound'} />
-            <MetricPanel label="Runtime Alerts" value={healthLabel === 'WARNING' ? 'Operational warning detected' : 'No critical alerts'} />
-            <MetricPanel
-              label="Telemetry"
-              value={`CPU: ${runtimeMetrics?.cpu?.usagePercent ?? 'N/A'} | RAM: ${runtimeMetrics?.ram?.usagePercent ?? 'N/A'}`}
-            />
-            <MetricPanel label="Last Sync" value={lastSync ? new Date(lastSync).toLocaleString() : 'N/A'} />
-            <MetricPanel label="Validated Environments" value={`${healthyBindings} / ${environmentBindings.length}`} />
+        {!rightCollapsed && (
+          <div className="xl:col-span-3 glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3 h-fit">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Runtime Intelligence</p>
+            <div className="space-y-2">
+              <MetricPanel label="Runtime Health" value={healthLabel} />
+              <MetricPanel label="PM2 Stability" value={`${onlinePm2Count} / ${pm2Processes.length} online`} />
+              <MetricPanel label="Infrastructure State" value={activeBinding?.nginxBinding ? 'Bound' : 'Unbound'} />
+              <MetricPanel label="Runtime Alerts" value={healthLabel === 'WARNING' ? 'Operational warning detected' : 'No critical alerts'} />
+              <MetricPanel label="Telemetry" value={`CPU: ${runtimeMetrics?.cpu?.usagePercent ?? 'N/A'} | RAM: ${runtimeMetrics?.ram?.usagePercent ?? 'N/A'}`} />
+              <MetricPanel label="Last Sync" value={lastSync ? new Date(lastSync).toLocaleString('ar-SA') : 'N/A'} />
+              <MetricPanel label="Validated Environments" value={`${healthyBindings} / ${environmentBindings.length}`} />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -307,7 +421,7 @@ export function ProjectWorkspace() {
 
 function MetricCard({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40">
+    <div className="px-2.5 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40">
       <p className="text-slate-500">{label}</p>
       <p className={`text-slate-700 dark:text-slate-200 font-bold truncate ${mono ? 'font-mono' : ''}`}>{value}</p>
     </div>
