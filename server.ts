@@ -337,11 +337,19 @@ try {
       mutation_id TEXT NOT NULL,
       mutation_kind TEXT NOT NULL,
       payload_json TEXT NOT NULL,
+      payload_hash TEXT,
+      execution_status TEXT DEFAULT 'PENDING',
+      last_result_json TEXT,
+      executed_at DATETIME,
       requested_by TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN payload_hash TEXT`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN execution_status TEXT DEFAULT 'PENDING'`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN last_result_json TEXT`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN executed_at DATETIME`); } catch {}
 
 function beginGovernedMutation(mutationId: string) {
   const existing = mutationCache.get(mutationId);
@@ -371,14 +379,19 @@ function failGovernedMutation(mutationId: string) {
 
 function persistPendingMutation(entry: PendingApprovalExecution) {
   const payload = JSON.stringify(entry);
+  const payloadHash = createHash('sha256').update(payload).digest('hex');
   sqliteDb.prepare(`
-    INSERT INTO runtime_pending_mutations (approval_id, runtime_id, mutation_id, mutation_kind, payload_json, requested_by)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO runtime_pending_mutations (approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, execution_status, requested_by)
+    VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
     ON CONFLICT(approval_id) DO UPDATE SET
       runtime_id = excluded.runtime_id,
       mutation_id = excluded.mutation_id,
       mutation_kind = excluded.mutation_kind,
       payload_json = excluded.payload_json,
+      payload_hash = excluded.payload_hash,
+      execution_status = 'PENDING',
+      last_result_json = NULL,
+      executed_at = NULL,
       requested_by = excluded.requested_by
   `).run(
     entry.approvalId,
@@ -386,22 +399,48 @@ function persistPendingMutation(entry: PendingApprovalExecution) {
     entry.mutationId,
     entry.kind,
     payload,
+    payloadHash,
     entry.requestedBy
   );
 }
 
 function getPendingMutationByApprovalId(approvalId: string): PendingApprovalExecution | null {
-  const row = sqliteDb.prepare('SELECT payload_json FROM runtime_pending_mutations WHERE approval_id = ?').get(approvalId) as any;
+  const row = sqliteDb.prepare('SELECT payload_json, payload_hash FROM runtime_pending_mutations WHERE approval_id = ?').get(approvalId) as any;
   if (!row?.payload_json) return null;
   try {
-    return JSON.parse(String(row.payload_json)) as PendingApprovalExecution;
+    const payloadJson = String(row.payload_json);
+    const hash = createHash('sha256').update(payloadJson).digest('hex');
+    if (row.payload_hash && String(row.payload_hash) !== hash) return null;
+    return JSON.parse(payloadJson) as PendingApprovalExecution;
   } catch {
     return null;
   }
 }
 
-function deletePendingMutation(approvalId: string) {
-  sqliteDb.prepare('DELETE FROM runtime_pending_mutations WHERE approval_id = ?').run(approvalId);
+function updatePendingMutationExecution(approvalId: string, status: 'COMPLETED' | 'FAILED', result: any) {
+  sqliteDb.prepare(`
+    UPDATE runtime_pending_mutations
+    SET execution_status = ?, last_result_json = ?, executed_at = CURRENT_TIMESTAMP
+    WHERE approval_id = ?
+  `).run(status, JSON.stringify(result || {}), approvalId);
+}
+
+function getPendingMutationRecord(approvalId: string) {
+  return sqliteDb.prepare(`
+    SELECT approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, execution_status, last_result_json, executed_at, requested_by, created_at
+    FROM runtime_pending_mutations
+    WHERE approval_id = ?
+  `).get(approvalId) as any;
+}
+
+function getPendingMutationsByRuntime(runtimeId: string) {
+  return sqliteDb.prepare(`
+    SELECT approval_id, runtime_id, mutation_id, mutation_kind, execution_status, executed_at, requested_by, created_at
+    FROM runtime_pending_mutations
+    WHERE runtime_id = ?
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all(runtimeId) as any[];
 }
 
 function execPromise(command: string, opts?: { cwd?: string; timeout?: number }) {
@@ -1615,6 +1654,16 @@ async function startServer() {
     }
   });
 
+  app.get("/api/runtime/:id/pending-mutations", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const rows = getPendingMutationsByRuntime(runtimeId);
+      res.json({ success: true, data: rows });
+    } catch (e) {
+      res.status(500).json({ success: false, message: 'Pending mutations fetch failed' });
+    }
+  });
+
   app.post("/api/runtime/:id/approvals", async (req, res) => {
     try {
       const runtime_id = req.params.id;
@@ -1635,7 +1684,7 @@ async function startServer() {
         const pending = getPendingMutationByApprovalId(req.params.approvalId);
         if (pending) {
           const executionResult = await executeApprovedMutation(pending);
-          deletePendingMutation(req.params.approvalId);
+          updatePendingMutationExecution(req.params.approvalId, executionResult.success ? 'COMPLETED' : 'FAILED', executionResult);
           addRuntimeLog(
             executionResult.success ? 'success' : 'error',
             executionResult.success
@@ -1646,12 +1695,49 @@ async function startServer() {
           return res.json({ success: true, data: { orchestration: executionResult, mutationId: pending.mutationId } });
         }
       }
-      if (normalizedStatus === 'REJECTED') {
-        deletePendingMutation(req.params.approvalId);
-      }
       res.json({ success: true, data: { orchestration: null } });
     } catch (e) {
       res.status(500).json({ success: false, message: 'Approval update failed' });
+    }
+  });
+
+  app.post("/api/runtime/:id/approvals/:approvalId/replay", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const approvalId = String(req.params.approvalId);
+      const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+      if (!approval) return res.status(404).json({ success: false, message: 'Approval not found for runtime' });
+      if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
+        return res.status(403).json({ success: false, message: 'Replay blocked: approval is not APPROVED', violation_type: 'ApprovalGate' });
+      }
+
+      const pendingRecord = getPendingMutationRecord(approvalId);
+      if (!pendingRecord) return res.status(404).json({ success: false, message: 'No mutation payload found for this approval' });
+      const pending = getPendingMutationByApprovalId(approvalId);
+      if (!pending) return res.status(422).json({ success: false, message: 'Payload integrity validation failed', violation_type: 'PayloadIntegrityGate' });
+
+      const replayMutationId = `replay-${pending.mutationId}-${Date.now()}`;
+      const replayPayload: PendingApprovalExecution = { ...pending, mutationId: replayMutationId };
+      const replayResult = await executeApprovedMutation(replayPayload);
+      updatePendingMutationExecution(approvalId, replayResult.success ? 'COMPLETED' : 'FAILED', replayResult);
+      addRuntimeLog(
+        replayResult.success ? 'success' : 'error',
+        replayResult.success
+          ? `Replay succeeded for approval ${approvalId} with mutation ${replayMutationId}`
+          : `Replay failed for approval ${approvalId} with mutation ${replayMutationId}`,
+        'governance_runtime'
+      );
+      res.json({
+        success: true,
+        data: {
+          approvalId,
+          previousMutationId: pending.mutationId,
+          replayMutationId,
+          result: replayResult
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message || 'Replay failed' });
     }
   });
 
@@ -2064,7 +2150,7 @@ async function startServer() {
           failGovernedMutation(mutationId);
           return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
         }
-        deletePendingMutation(String(approvalId));
+        updatePendingMutationExecution(String(approvalId), 'COMPLETED', { success: true, source: 'direct_approved_execution' });
       }
 
      addRuntimeLog('warning', `[mutation:${mutationId}] PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
@@ -2207,7 +2293,7 @@ async function startServer() {
         failGovernedMutation(mutationId);
         return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
       }
-      deletePendingMutation(String(approvalId));
+      updatePendingMutationExecution(String(approvalId), 'COMPLETED', { success: true, source: 'direct_approved_execution' });
     }
 
     const executionContext = cwd ? path.resolve(cwd) : process.cwd();

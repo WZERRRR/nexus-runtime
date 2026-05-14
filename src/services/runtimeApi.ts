@@ -976,11 +976,25 @@ class RuntimeAPI {
     return data.data || [];
   }
 
+  async getRuntimePendingMutations(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/pending-mutations`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch pending mutations');
+    return data.data || [];
+  }
+
   async reviewRuntimeApproval(runtimeId: string | number, approvalId: string, status: 'APPROVED' | 'REJECTED', reviewedBy: string = 'RuntimeOperator', reason: string = ''): Promise<any> {
     const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, reviewed_by: reviewedBy, reason })
+    });
+    return res.json();
+  }
+
+  async replayApprovedMutation(runtimeId: string | number, approvalId: string): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}/replay`, {
+      method: 'POST'
     });
     return res.json();
   }

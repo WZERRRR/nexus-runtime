@@ -55,6 +55,7 @@ export function ProjectWorkspace() {
   const [recoveries, setRecoveries] = useState<any[]>([]);
   const [governanceEvents, setGovernanceEvents] = useState<any[]>([]);
   const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
+  const [pendingMutations, setPendingMutations] = useState<any[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
@@ -69,7 +70,7 @@ export function ProjectWorkspace() {
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
@@ -79,6 +80,7 @@ export function ProjectWorkspace() {
       runtimeAPI.getRuntimeRecoveries(runtimeId).catch(() => []),
       runtimeAPI.getGovernanceActions().catch(() => []),
       runtimeAPI.getRuntimeApprovals(runtimeId).catch(() => []),
+      runtimeAPI.getRuntimePendingMutations(runtimeId).catch(() => []),
     ]);
 
     setEnvironmentBindings(Array.isArray(envs) ? envs : []);
@@ -90,6 +92,7 @@ export function ProjectWorkspace() {
     setRecoveries(Array.isArray(recoveryRows) ? recoveryRows : []);
     setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
     setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
+    setPendingMutations(Array.isArray(pendingRows) ? pendingRows : []);
     setLastSync(new Date().toISOString());
   };
 
@@ -232,6 +235,15 @@ export function ProjectWorkspace() {
     const runtimeId = String(project?.runtime_id || project?.id || '');
     try {
       await runtimeAPI.reviewRuntimeApproval(runtimeId, approvalId, status, 'RuntimeOperator', `Decision from workspace: ${status}`);
+      await loadOperationalData(project);
+    } catch {}
+  };
+
+  const handleReplayMutation = async (approvalId: string) => {
+    if (!project) return;
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    try {
+      await runtimeAPI.replayApprovedMutation(runtimeId, approvalId);
       await loadOperationalData(project);
     } catch {}
   };
@@ -425,9 +437,9 @@ export function ProjectWorkspace() {
               <MetricPanel label="Validated Environments" value={`${healthyBindings} / ${environmentBindings.length}`} />
             </div>
             <div className="mt-3 rounded-lg border border-slate-200 dark:border-white/10 p-2 bg-white dark:bg-slate-900/40">
-              <p className="text-xs text-slate-500 mb-2">Approvals Queue</p>
+              <p className="text-xs text-slate-500 mb-2">Approvals & Mutation Execution Queue</p>
               <div className="space-y-2 max-h-52 overflow-auto">
-                {runtimeApprovals.filter((row: any) => String(row?.approval_status || '').toUpperCase() === 'PENDING').length === 0 ? (
+                {runtimeApprovals.filter((row: any) => String(row?.approval_status || '').toUpperCase() === 'PENDING').length === 0 && pendingMutations.length === 0 ? (
                   <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                 ) : runtimeApprovals
                   .filter((row: any) => String(row?.approval_status || '').toUpperCase() === 'PENDING')
@@ -442,6 +454,26 @@ export function ProjectWorkspace() {
                       </div>
                     </div>
                   ))}
+                {pendingMutations.slice(0, 8).map((row: any) => (
+                  <div key={`${row.approval_id}-mutation`} className="rounded-md border border-slate-200 dark:border-white/10 p-2 bg-slate-50 dark:bg-slate-950/50">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.mutation_kind || 'mutation'} | {row.approval_id}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        String(row.execution_status || '').toUpperCase() === 'COMPLETED'
+                          ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+                          : String(row.execution_status || '').toUpperCase() === 'FAILED'
+                            ? 'text-red-400 border-red-500/30 bg-red-500/10'
+                            : 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                      }`}>
+                        {String(row.execution_status || 'PENDING').toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">Mutation: {row.mutation_id || 'N/A'}</p>
+                    <div className="mt-1.5 flex items-center gap-1">
+                      <button onClick={() => handleReplayMutation(row.approval_id)} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">Replay</button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
