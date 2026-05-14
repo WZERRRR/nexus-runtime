@@ -15,7 +15,7 @@ function statusColor(status: string) {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)] px-3 py-2">
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)] px-3 py-2">
       <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
         <span>{label}</span>
         <span className="text-blue-400">{icon}</span>
@@ -133,7 +133,7 @@ export function Dashboard() {
         <button
           onClick={() => fetchData(true)}
           disabled={isRefreshing}
-          className="px-3 py-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/40 text-xs font-bold"
+          className="px-3 py-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/40 text-xs font-bold"
         >
           {isRefreshing ? 'تحديث...' : 'تحديث'}
         </button>
@@ -155,7 +155,7 @@ export function Dashboard() {
             {events.length === 0 ? (
               <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
             ) : events.map((ev: any, i: number) => (
-              <div key={`${ev.id || i}-${ev.timestamp || i}`} className="rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
+              <div key={`${ev.id || i}-${ev.timestamp || i}`} className="rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
                 <p className="text-xs font-bold text-[var(--text-primary)] truncate">{ev.message || ev.event || 'event'}</p>
                 <p className="text-[10px] text-[var(--text-tertiary)]">{ev.timestamp || ev.created_at || 'N/A'}</p>
               </div>
@@ -169,7 +169,7 @@ export function Dashboard() {
             {unifiedTimeline.length === 0 ? (
               <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
             ) : unifiedTimeline.map((row) => (
-              <div key={row.id} className="rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
+              <div key={row.id} className="rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
                 <p className={`text-xs font-bold ${statusColor(row.status)}`}>{row.type} · {row.label}</p>
                 <p className="text-xs text-[var(--text-primary)] truncate">{row.message || 'N/A'}</p>
                 <p className="text-[10px] text-[var(--text-tertiary)]">{row.ts || 'N/A'}</p>
@@ -188,7 +188,7 @@ export function Dashboard() {
           {pm2Procs.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
           ) : pm2Procs.slice(0, 12).map((p: any, i: number) => (
-            <div key={`${p.id || i}-${p.name || i}`} className="rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
+            <div key={`${p.id || i}-${p.name || i}`} className="rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 px-2 py-1.5">
               <p className="text-xs font-bold text-[var(--text-primary)] truncate">{p.name || `proc-${i}`}</p>
               <p className={`text-[10px] font-bold ${statusColor(p.status || 'offline')}`}>{String(p.status || 'unknown').toUpperCase()}</p>
               <p className="text-[10px] text-[var(--text-tertiary)]">CPU {p.cpu || 'N/A'} · RAM {p.mem || p.memory || 'N/A'}</p>

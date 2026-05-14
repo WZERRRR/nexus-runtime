@@ -166,13 +166,13 @@ export function Deploy() {
   const completedStages = useMemo(() => timeline.filter((s) => s.status === 'ok').length, [timeline]);
 
   return (
-    <div className="space-y-3 pb-6" dir="rtl">
+    <div className="space-y-2 pb-6" dir="rtl">
       <ProjectHeader
         projectName={context?.name}
         project={context}
         sectionName="Runtime Mutation Execution Center"
         actions={
-          <button onClick={runDeploy} disabled={!runtimeId || isRunning} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-2">
+          <button onClick={runDeploy} disabled={!runtimeId || isRunning} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-2">
             <Play className="w-4 h-4" />
             {isRunning ? 'Running...' : 'Run Governed Deploy'}
           </button>
@@ -191,7 +191,7 @@ export function Deploy() {
           <h3 className="text-xs font-black text-[var(--text-primary)]">Operational Runtime Mutation Timeline</h3>
           <div className="flex items-center gap-1">
             {(['all', 'deploy', 'recovery', 'governance', 'runtime'] as MutationFilter[]).map((f) => (
-              <button key={f} onClick={() => setFilter(f)} className={`px-2 py-1 rounded-md text-[10px] border ${filter === f ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[var(--border-subtle)] text-[var(--text-tertiary)]'}`}>
+              <button key={f} onClick={() => setFilter(f)} className={`px-2 py-1 rounded-lg text-[10px] border ${filter === f ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[var(--border-subtle)] text-[var(--text-tertiary)]'}`}>
                 {f}
               </button>
             ))}
@@ -201,7 +201,7 @@ export function Deploy() {
           {mergedMutationTimeline.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
           ) : mergedMutationTimeline.map((item) => (
-            <div key={item.id} className="p-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
+            <div key={item.id} className="p-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-[var(--text-primary)]">{item.source} · {item.label}</p>
                 <p className={`text-[10px] font-bold ${mutationState(item.status)}`}>{String(item.status).toUpperCase()}</p>
@@ -219,7 +219,7 @@ export function Deploy() {
           {timeline.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
           ) : timeline.map((stage, idx) => (
-            <div key={`${stage.stage}-${idx}`} className="p-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 mb-1.5">
+            <div key={`${stage.stage}-${idx}`} className="p-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30 mb-1.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-primary)]">
                   {stage.status === 'ok' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : stage.status === 'failed' ? <XCircle className="w-4 h-4 text-red-500" /> : <Activity className="w-4 h-4 text-amber-500" />}
@@ -254,7 +254,7 @@ export function Deploy() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="px-3 py-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
+    <div className="px-3 py-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
       <p className="text-[var(--text-tertiary)] text-xs">{label}</p>
       <p className="text-[var(--text-primary)] font-bold text-sm">{value}</p>
     </div>
@@ -263,7 +263,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function Verification({ label, value }: { label: string; value: string }) {
   return (
-    <div className="px-2 py-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
+    <div className="px-2 py-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
       <p className="text-[10px] text-[var(--text-tertiary)]">{label}</p>
       <p className={`text-xs font-bold ${mutationState(value)}`}>{value}</p>
     </div>

@@ -155,18 +155,18 @@ export function BackupCenter() {
   }, [timeline, recoveries, governance, runtimeEvents, mutationStream]);
 
   return (
-    <div className="space-y-3 pb-6" dir="rtl">
+    <div className="space-y-2 pb-6" dir="rtl">
       <ProjectHeader
         projectName={context?.name}
         project={context}
         sectionName="Runtime Recovery Operations Center"
         actions={
           <div className="flex items-center gap-2">
-            <button onClick={loadRecoveryData} className="px-3 py-2 rounded-lg border border-[var(--border-subtle)] text-xs font-bold flex items-center gap-2">
+            <button onClick={loadRecoveryData} className="px-3 py-2 rounded-xl border border-[var(--border-subtle)] text-xs font-bold flex items-center gap-2">
               <RefreshCw className="w-4 h-4" />
               Refresh
             </button>
-            <button onClick={runRollback} disabled={!runtimeId || !selectedSnapshot || isRunning} className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-2">
+            <button onClick={runRollback} disabled={!runtimeId || !selectedSnapshot || isRunning} className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-2">
               <Undo2 className="w-4 h-4" />
               {isRunning ? 'Rollback Running...' : 'Run Governed Rollback'}
             </button>
@@ -187,7 +187,7 @@ export function BackupCenter() {
           <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
         ) : (
           <div className="space-y-2">
-            <select value={selectedSnapshot} onChange={(e) => setSelectedSnapshot(e.target.value)} className="w-full rounded-lg px-3 py-2 bg-slate-100 dark:bg-slate-900 text-xs font-bold">
+            <select value={selectedSnapshot} onChange={(e) => setSelectedSnapshot(e.target.value)} className="w-full rounded-xl px-3 py-2 bg-slate-100 dark:bg-slate-900 text-xs font-bold">
               {snapshots.map((snap) => (
                 <option key={snap.snapshot_id} value={snap.snapshot_id}>
                   {snap.snapshot_id} | {snap.snapshot_type} | {snap.created_at}
@@ -196,7 +196,7 @@ export function BackupCenter() {
             </select>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
               {snapshots.slice(0, 10).map((snap) => (
-                <div key={snap.snapshot_id} className="p-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
+                <div key={snap.snapshot_id} className="p-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
                   <p className="text-xs font-bold text-[var(--text-primary)]">{snap.snapshot_id}</p>
                   <p className="text-[10px] text-[var(--text-tertiary)]">{snap.snapshot_type} / {snap.created_by}</p>
                 </div>
@@ -212,7 +212,7 @@ export function BackupCenter() {
           {mergedRecoveryTimeline.length === 0 ? (
             <p className="text-xs text-[var(--text-tertiary)]">لا توجد بيانات تشغيلية حالياً</p>
           ) : mergedRecoveryTimeline.map((row) => (
-            <div key={row.id} className="p-2 rounded-lg border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
+            <div key={row.id} className="p-2 rounded-xl border border-[var(--border-subtle)] bg-white dark:bg-slate-900/30">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-[var(--text-primary)]">{row.source} · {row.label}</p>
                 <p className={`text-[10px] font-bold ${recoveryState(row.status)}`}>{String(row.status).toUpperCase()}</p>
@@ -240,7 +240,7 @@ export function BackupCenter() {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="px-3 py-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
+    <div className="px-3 py-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
       <div className="flex items-center gap-2 text-[var(--text-tertiary)] text-xs">{icon}<span>{label}</span></div>
       <p className="text-[var(--text-primary)] font-bold text-sm mt-1">{value}</p>
     </div>
