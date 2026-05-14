@@ -128,6 +128,10 @@ export function KernelWorkspace({ onNavigate }: { onNavigate: (view: string) => 
  }
  };
 
+ const handleApplyRecommendation = (title: string) => {
+ alert(`تم تحويل الإجراء المقترح للتنفيذ المحكوم: ${title}`);
+ };
+
  const formatUptime = (seconds: number) => {
  const h = Math.floor(seconds / 3600);
  const m = Math.floor((seconds % 3600) / 60);
@@ -472,7 +476,7 @@ export function KernelWorkspace({ onNavigate }: { onNavigate: (view: string) => 
  </div>
  <p className="text-[10px] font-bold text-slate-200 mb-1">{rec.title}</p>
  <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-relaxed mb-3">{rec.description}</p>
- <button className="w-full py-1.5 bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-black text-[9px] font-black uppercase rounded transition-all">
+ <button onClick={() => handleApplyRecommendation(rec.title)} className="w-full py-1.5 bg-yellow-500/10 hover:bg-yellow-500 text-yellow-500 hover:text-black text-[9px] font-black uppercase rounded transition-all">
  تطبيق الإجراء الموصى به
  </button>
  </div>

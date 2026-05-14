@@ -62,6 +62,18 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  return 'text-red-500';
  };
 
+ const handleApplyRecommendation = (title: string) => {
+ alert(`تم إرسال التوصية للمراجعة التشغيلية: ${title}`);
+ };
+
+ const handleDismissRecommendation = (title: string) => {
+ alert(`تم تجاهل التوصية مؤقتاً: ${title}`);
+ };
+
+ const handleOpenAnomalyMap = () => {
+ onNavigate('monitoring');
+ };
+
  return (
  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
  {/* Header */}
@@ -98,8 +110,8 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  { title: "مخاطر النشر", value: `${deployRisk?.risk_score || 0}%`, icon: Rocket, color: "text-orange-500", bg: "bg-orange-500/10" },
  ].map((stat, i) => (
  <div key={i} className="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-600 transition-all ">
- <div className={`absolute top-0 right-0 p-4 \${stat.bg} rounded-bl-3xl opacity-40 group-hover:opacity-100 transition-opacity`}>
- <stat.icon className={`w-5 h-5 \${stat.color}`} />
+ <div className={`absolute top-0 right-0 p-4 ${stat.bg} rounded-bl-3xl opacity-40 group-hover:opacity-100 transition-opacity`}>
+ <stat.icon className={`w-5 h-5 ${stat.color}`} />
  </div>
  <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest leading-none mb-3">{stat.title}</p>
  <p className="text-2xl font-black text-white tracking-tight">{stat.value}</p>
@@ -171,7 +183,7 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  ].map((idx, i) => (
  <div key={i}>
  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{idx.label}</p>
- <p className={`text-sm font-black uppercase \${idx.trendColor}`}>{idx.value}</p>
+ <p className={`text-sm font-black uppercase ${idx.trendColor}`}>{idx.value}</p>
  </div>
  ))}
  </div>
@@ -194,7 +206,7 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  <div key={i} className="flex flex-col md:flex-row gap-4 p-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl group hover:border-slate-600 transition-all">
  <div className="flex-1">
  <div className="flex items-center gap-3 mb-2">
- <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border \${
+ <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${
  rec.severity === 'Critical' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500'
  }`}>{rec.severity === 'Critical' ? 'حرج' : 'تحذير'}</span>
  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest font-mono text-right">منطقة التأثير: {rec.impact_area}</span>
@@ -203,10 +215,10 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-4">{rec.description}</p>
  
  <div className="flex items-center gap-2">
- <button className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
+ <button onClick={() => handleApplyRecommendation(rec.title)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
  موافقة وتنفيذ
  </button>
- <button className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
+ <button onClick={() => handleDismissRecommendation(rec.title)} className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
  تجاهل
  </button>
  </div>
@@ -240,7 +252,7 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  />
  <circle 
  cx="64" cy="64" r="58" 
- className={`fill-none stroke-[8] transition-all duration-1000 \${
+ className={`fill-none stroke-[8] transition-all duration-1000 ${
  (deployRisk?.risk_score || 0) < 20 ? 'stroke-emerald-500' :
  (deployRisk?.risk_score || 0) < 50 ? 'stroke-yellow-500' : 'stroke-red-500'
  }`}
@@ -255,7 +267,7 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  <span className="text-[8px] text-slate-500 uppercase font-black">معدل المخاطر</span>
  </div>
  </div>
- <p className={`text-[10px] font-black uppercase tracking-widest \${
+ <p className={`text-[10px] font-black uppercase tracking-widest ${
  deployRisk?.safety_status === 'Optimal' ? 'text-emerald-400' : 
  deployRisk?.safety_status === 'Caution' ? 'text-yellow-400' : 'text-red-400'
  }`}>حالة السلامة: {deployRisk?.safety_status === 'Optimal' ? 'مثالية' : deployRisk?.safety_status === 'Caution' ? 'حذر' : 'غير آمن'}</p>
@@ -263,8 +275,8 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
 
  <div className="space-y-3 mt-4">
  {[
- { label: "احتمالية التراجع", value: `\${deployRisk?.rollback_probability || 0}%` },
- { label: "احتمالية الاستقرار", value: `\${100 - (deployRisk?.risk_score || 0)}%` },
+ { label: "احتمالية التراجع", value: `${deployRisk?.rollback_probability || 0}%` },
+ { label: "احتمالية الاستقرار", value: `${100 - (deployRisk?.risk_score || 0)}%` },
  ].map((item, i) => (
  <div key={i} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-950/50 rounded-lg border border-slate-200 dark:border-slate-800/50">
  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-tight">{item.label}</span>
@@ -295,13 +307,13 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  <div key={i} className="p-3 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl group hover:border-blue-500/30 transition-all">
  <div className="flex items-center justify-between mb-2">
  <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">{opt.type === 'Resource' ? 'موارد' : opt.type === 'Performance' ? 'أداء' : 'تكلفة'}</span>
- <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded \${
+ <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${
  opt.impact === 'High' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
  }`}>التأثير: {opt.impact === 'High' ? 'عالي' : opt.impact === 'Medium' ? 'متوسط' : 'منخفض'}</span>
  </div>
  <p className="text-[11px] font-black text-slate-200 mb-1">{opt.title}</p>
  <p className="text-[10px] text-slate-500 leading-tight mb-2">{opt.description}</p>
- <button className="text-[9px] font-black uppercase text-blue-400 hover:text-blue-300 transition-colors">تطبيق الاستراتيجية &larr;</button>
+ <button onClick={() => handleApplyRecommendation(opt.title)} className="text-[9px] font-black uppercase text-blue-400 hover:text-blue-300 transition-colors">تطبيق الاستراتيجية &larr;</button>
  </div>
  ))}
  </div>
@@ -329,7 +341,7 @@ export function IntelligenceWorkspace({ onNavigate }: { onNavigate: (view: strin
  </div>
  ))}
  </div>
- <button className="w-full mt-6 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-black uppercase rounded-lg border border-slate-300 dark:border-slate-700 transition-all">
+ <button onClick={handleOpenAnomalyMap} className="w-full mt-6 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-black uppercase rounded-lg border border-slate-300 dark:border-slate-700 transition-all">
  الدخول لخريطة الانحرافات
  </button>
  </div>

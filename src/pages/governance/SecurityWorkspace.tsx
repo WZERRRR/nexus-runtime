@@ -33,6 +33,14 @@ export function SecurityWorkspace({ onNavigate }: { onNavigate: (view: string) =
  setIsLocking(false);
  };
 
+ const handleInspectThreat = (threatType: string) => {
+ alert(`تم فتح وضع التحقيق للتهديد: ${threatType}`);
+ };
+
+ const handleOpenPolicies = () => {
+ onNavigate('kernel');
+ };
+
  return (
  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
@@ -147,7 +155,7 @@ export function SecurityWorkspace({ onNavigate }: { onNavigate: (view: string) =
  <div className="text-right">
  <span className="text-[10px] text-slate-600 uppercase font-black font-mono">{new Date(event.timestamp).toLocaleTimeString()}</span>
  </div>
- <button className="bg-white dark:bg-slate-900 hover:bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 text-white px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shadow-xl group-hover:border-red-500/50">
+ <button onClick={() => handleInspectThreat(event.threat_type)} className="bg-white dark:bg-slate-900 hover:bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-slate-400 text-white px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all shadow-xl group-hover:border-red-500/50">
  تحقيق
  </button>
  </div>
@@ -180,7 +188,7 @@ export function SecurityWorkspace({ onNavigate }: { onNavigate: (view: string) =
  </div>
  ))}
  </div>
- <button className="w-full mt-8 bg-purple-600 hover:bg-purple-500 text-white rounded-xl py-3 text-[10px] uppercase font-black tracking-widest transition-all shadow-sm dark:shadow-[0_0_15px_rgba(147,51,234,0.3)] border border-purple-400/20">
+ <button onClick={handleOpenPolicies} className="w-full mt-8 bg-purple-600 hover:bg-purple-500 text-white rounded-xl py-3 text-[10px] uppercase font-black tracking-widest transition-all shadow-sm dark:shadow-[0_0_15px_rgba(147,51,234,0.3)] border border-purple-400/20">
  إدارة سياسات الأمن
  </button>
  </div>
