@@ -204,7 +204,7 @@ export function Projects() {
  };
 
  return (
- <div className="space-y-8 pb-12 relative">
+ <div className="space-y-6 pb-8 relative">
  <AnimatePresence>
  {toast && (
  <motion.div 
@@ -264,7 +264,7 @@ export function Projects() {
  title="فشل مزامنة المشاريع التشغيلية"
  />
 
- <div className="grid grid-cols-1 gap-8">
+ <div className="grid grid-cols-1 gap-6">
  <AnimatePresence mode="wait">
  {isLoading ? (
  Array.from({ length: 2 }).map((_, idx) => (
@@ -275,8 +275,8 @@ export function Projects() {
  exit={{ opacity: 0 }}
  className="glass-panel rounded-2xl overflow-hidden group"
  >
- <div className="bg-white dark:bg-slate-900/40 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
- <div className="flex items-center gap-6 w-full">
+ <div className="bg-white dark:bg-slate-900/40 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+ <div className="flex items-center gap-4 w-full">
  <div className="w-16 h-16 rounded-2xl bg-slate-200 dark:bg-white/5 animate-pulse shrink-0"></div>
  <div className="flex-1 space-y-3">
  <div className="h-6 bg-slate-200 dark:bg-white/5 rounded-md w-1/3 animate-pulse"></div>
@@ -294,7 +294,7 @@ export function Projects() {
  ))}
  </div>
  </div>
- <div className="p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+ <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
  {Array.from({ length: 2 }).map((_, i) => (
  <div key={i} className="h-48 rounded-2xl bg-slate-200 dark:bg-white/5 animate-pulse"></div>
  ))}
@@ -328,16 +328,16 @@ export function Projects() {
  key={project.id} 
  className="glass-panel rounded-2xl overflow-hidden group"
  >
-  <div className="bg-white dark:bg-slate-900/60 border-b border-slate-200 dark:border-white/10 p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative">
+  <div className="bg-white dark:bg-slate-900/60 border-b border-slate-200 dark:border-white/10 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative">
     {/* Decorative background element with enhanced glow and slower animation */}
     <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-blue-500/[0.04] blur-[120px] -translate-y-1/2 translate-x-1/3 rounded-full transition-all duration-1000 pointer-events-none"></div>
     
     <div className="flex flex-col md:flex-row items-start md:items-center gap-5 relative z-10 w-full lg:w-auto">
-      <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-white/10 text-blue-400 shadow-xl shrink-0 group-hover:scale-105 transition-transform duration-500">
+      <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-white/10 text-blue-400 shadow-xl shrink-0 group-hover:scale-105 transition-transform duration-500">
         {project.type.includes('API') ? <Code2 className="w-8 h-8" /> : <LayoutTemplate className="w-8 h-8" />}
       </div>
       <div className="flex-1 min-w-0">
-        <h2 className="text-2xl font-black text-white mb-3 tracking-tight group-hover:text-blue-400 transition-colors truncate drop-shadow-sm">{project.name}</h2>
+        <h2 className="text-xl font-black text-white mb-2 tracking-tight group-hover:text-blue-400 transition-colors truncate drop-shadow-sm">{project.name}</h2>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-blue-400 font-bold bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20 flex items-center gap-1.5 shadow-sm text-xs uppercase tracking-wider">
             <Terminal className="w-3.5 h-3.5" />
@@ -495,12 +495,12 @@ export function Projects() {
     </div>
   </div>
 
- <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+ <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
  {project.environments.map(env => (
  <motion.div 
  whileHover={{ y: -4 }}
  key={`${project.id}-${env.name}`} 
- className={`p-6 rounded-[1.5rem] border bg-white dark:bg-slate-900/40 relative overflow-hidden group/env hover:bg-slate-100 dark:bg-slate-800/60 transition-all duration-300 ${
+ className={`p-4 rounded-xl border bg-white dark:bg-slate-900/40 relative overflow-hidden group/env hover:bg-slate-100 dark:bg-slate-800/60 transition-all duration-300 ${
  env.name === 'LIVE' ? 'border-red-500/10 hover:border-red-500/30' :
  env.name === 'STAGING' ? 'border-orange-500/10 hover:border-orange-500/30' :
  'border-blue-500/10 hover:border-blue-500/30'
@@ -586,9 +586,9 @@ export function Projects() {
  initial={{ opacity: 0, scale: 0.9, y: 20 }}
  animate={{ opacity: 1, scale: 1, y: 0 }}
  exit={{ opacity: 0, scale: 0.9, y: 20 }}
- className="relative w-full max-w-2xl glass-panel rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+ className="relative w-full max-w-2xl glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
  >
- <div className="flex items-center justify-between p-7 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
+ <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
  <h2 className="text-2xl font-black text-white flex items-center gap-3 tracking-tight">
  <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20">
  <Plus className="w-6 h-6 text-blue-500" />
@@ -627,12 +627,12 @@ export function Projects() {
    </button>
  </div>
 
- <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-8 relative">
+ <div className="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-6 relative">
  <AnimatePresence mode="wait">
  {addModalTab === 'provision' && (
     provisioningState === 'idle' ? (
     <motion.div key="form" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0, position: 'absolute', pointerEvents: 'none'}} className="space-y-8 min-w-full">
- <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+ <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
  <div className="space-y-2">
  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">اسم المشروع التجاري</label>
  <input 
@@ -656,7 +656,7 @@ export function Projects() {
  </div>
  </div>
 
- <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+ <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
  <div className="space-y-2">
  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">السيرفر المستضيف</label>
  <select value={provisioningForm.server} onChange={e => setProvisioningForm({...provisioningForm, server: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-all font-medium">
@@ -748,7 +748,7 @@ export function Projects() {
  <motion.div key="provisioning" initial={{opacity: 0, scale: 0.95}} animate={{opacity: 1, scale: 1}} className="flex flex-col items-center justify-center py-8 min-w-full">
  <div className="relative mb-8">
  <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full animate-pulse"></div>
- <div className="w-24 h-24 bg-white dark:bg-slate-900 border-2 border-blue-500/50 rounded-3xl flex items-center justify-center relative z-10 shadow-sm dark:shadow-[0_0_30px_rgba(59,130,246,0.3)]">
+ <div className="w-24 h-24 bg-white dark:bg-slate-900 border-2 border-blue-500/50 rounded-xl flex items-center justify-center relative z-10 shadow-sm dark:shadow-[0_0_30px_rgba(59,130,246,0.3)]">
  {provisioningState === 'ready' ? (
  <CheckCircle2 className="w-12 h-12 text-emerald-400 drop-shadow-sm dark:shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
  ) : (
@@ -789,7 +789,7 @@ export function Projects() {
  </AnimatePresence>
  </div>
 
- <div className="p-8 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row justify-end gap-4 shrink-0 transition-all">
+ <div className="p-5 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex flex-col sm:flex-row justify-end gap-3 shrink-0 transition-all">
  <button 
  onClick={() => {
  setIsAddModalOpen(false);
@@ -831,9 +831,9 @@ export function Projects() {
  initial={{ opacity: 0, scale: 0.9, y: 20 }}
  animate={{ opacity: 1, scale: 1, y: 0 }}
  exit={{ opacity: 0, scale: 0.9, y: 20 }}
- className="relative w-full max-w-lg glass-panel rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+ className="relative w-full max-w-lg glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
  >
- <div className="flex items-center justify-between p-7 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
+ <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
  <h2 className="text-2xl font-black text-white flex items-center gap-3 tracking-tight">
  <div className="p-2 bg-pink-600/10 rounded-xl border border-pink-500/20">
  <Layers className="w-6 h-6 text-pink-500" />
@@ -848,7 +848,7 @@ export function Projects() {
  </button>
  </div>
 
- <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+ <div className="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-5">
  <div className="space-y-4">
  <div className="space-y-2">
  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">مسمى البيئة</label>
@@ -883,7 +883,7 @@ export function Projects() {
  </div>
  </div>
 
- <div className="p-8 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex justify-end gap-4 shrink-0">
+ <div className="p-5 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex justify-end gap-3 shrink-0">
  <button 
  onClick={() => setIsAddEnvModalOpen({projectId: null, open: false})}
  className="px-6 py-2.5 text-slate-600 dark:text-slate-400 hover:text-white rounded-xl transition-all text-sm font-bold"
@@ -920,9 +920,9 @@ export function Projects() {
           initial={{ opacity: 0, scale: 0.9, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          className="relative w-full max-w-2xl glass-panel rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          className="relative w-full max-w-2xl glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         >
-          <div className="flex items-center justify-between p-7 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
+          <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50">
             <h2 className="text-2xl font-black text-white flex items-center gap-3 tracking-tight">
               <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20">
                 <Edit className="w-6 h-6 text-blue-500" />
@@ -934,8 +934,8 @@ export function Projects() {
             </button>
           </div>
 
-          <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-8 text-right font-sans">
-            <div className="grid grid-cols-2 gap-6">
+          <div className="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-6 text-right font-sans">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Runtime Name</label>
                 <input 
@@ -984,7 +984,7 @@ export function Projects() {
             </div>
           </div>
 
-          <div className="p-8 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex justify-end gap-4">
+          <div className="p-5 border-t border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/50 flex justify-end gap-3">
             <button 
               onClick={() => setIsEditModalOpen(false)} 
               className="px-6 py-2.5 text-slate-600 dark:text-slate-400 hover:text-white rounded-xl transition-all text-sm font-bold"
@@ -1021,9 +1021,9 @@ export function Projects() {
           initial={{ opacity: 0, scale: 0.9, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.9, y: 20 }}
-          className="relative w-full max-w-lg glass-panel border border-red-500/20 bg-white dark:bg-slate-900/90 rounded-[2rem] shadow-2xl overflow-hidden"
+          className="relative w-full max-w-lg glass-panel border border-red-500/20 bg-white dark:bg-slate-900/90 rounded-xl shadow-2xl overflow-hidden"
         >
-          <div className="p-8">
+          <div className="p-5">
             <div className="flex items-center gap-4 mb-6">
               <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/20">
                 <Trash2 className="w-6 h-6 text-red-500" />
@@ -1061,7 +1061,7 @@ export function Projects() {
             </div>
           </div>
 
-          <div className="p-8 border-t border-red-500/10 bg-red-500/5 flex justify-end gap-4">
+          <div className="p-5 border-t border-red-500/10 bg-red-500/5 flex justify-end gap-3">
             <button onClick={() => setIsDeleteModalOpen(false)} className="px-6 py-2.5 text-slate-600 dark:text-slate-400 hover:text-white rounded-xl transition-all text-sm font-bold">إلغاء</button>
             <button 
               onClick={handleDelete} 

@@ -238,14 +238,14 @@ export function Monitoring() {
       )}
 
       {isLoading && !snapshot ? (
-        <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
+        <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
           <div className="text-center">
             <RefreshCw className="mx-auto h-8 w-8 animate-spin text-blue-500" />
             <p className="mt-3 text-xs font-black text-[var(--text-tertiary)]">جار قراءة حالة Runtime الفعلية...</p>
           </div>
         </div>
       ) : !snapshot ? (
-        <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
+        <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
           <div className="text-center">
             <AlertTriangle className="mx-auto h-10 w-10 text-orange-500" />
             <h2 className="mt-3 text-base font-black text-[var(--text-primary)]">لا توجد بيانات مراقبة فعلية</h2>
@@ -330,7 +330,7 @@ function MetricCard({ icon, label, value }: { key?: React.Key; icon: React.React
 
 function ChartPanel({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactElement }) {
   return (
-    <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-5">
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)] p-4">
       <div className="mb-5">
         <h3 className="text-sm font-black text-[var(--text-primary)]">{title}</h3>
         <p className="mt-1 text-[10px] font-bold text-[var(--text-tertiary)]">{subtitle}</p>
@@ -347,13 +347,13 @@ function ChartPanel({ title, subtitle, children }: { title: string; subtitle: st
 function Panel({ title, empty, children }: { title: string; empty: string; children: React.ReactNode }) {
   const rows = React.Children.toArray(children);
   return (
-    <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
+    <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-bg)]">
       <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] p-4">
         <Bell className="h-4 w-4 text-blue-500" />
         <h3 className="text-sm font-black text-[var(--text-primary)]">{title}</h3>
       </div>
       <div className="max-h-72 overflow-y-auto p-2">
-        {rows.length ? rows : <div className="p-8 text-center text-xs font-bold text-[var(--text-tertiary)]">{empty}</div>}
+        {rows.length ? rows : <div className="p-6 text-center text-xs font-bold text-[var(--text-tertiary)]">{empty}</div>}
       </div>
     </section>
   );
