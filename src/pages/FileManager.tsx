@@ -665,7 +665,7 @@ export function FileManager() {
               exit={{ opacity: 0 }}
               className="h-full flex flex-col items-center justify-center gap-6 py-20 text-center"
             >
-               <div className="w-20 h-20 bg-red-500/10 rounded-3xl border border-red-500/20 flex items-center justify-center">
+               <div className="w-20 h-20 bg-red-500/10 rounded-xl border border-red-500/20 flex items-center justify-center">
                   <HardDrive className="w-8 h-8 text-red-500 opacity-80" />
                </div>
                <div>
@@ -748,7 +748,7 @@ export function FileManager() {
               key="list"
                initial={{ opacity: 0, y: 20 }}
                animate={{ opacity: 1, y: 0 }}
-               className="bg-slate-100 dark:bg-black/40 rounded-3xl border border-slate-200 dark:border-white/10 overflow-hidden shadow-2xl"
+               className="bg-slate-100 dark:bg-black/40 rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden shadow-2xl"
             >
                <table className="w-full text-left">
                   <thead>
@@ -806,18 +806,18 @@ export function FileManager() {
       {/* 4. Modals (New File/Folder/Terminal) */}
       <AnimatePresence>
         {modalType !== 'none' && (
-          <motion.div key="file-modal" className="fixed inset-0 z-[150] flex items-center justify-center p-8 bg-slate-100 dark:bg-black/80 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div key="file-modal" className="fixed inset-0 z-[150] flex items-center justify-center p-5 bg-slate-100 dark:bg-black/80 backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div 
                initial={{ opacity: 0, scale: 0.9 }}
                animate={{ opacity: 1, scale: 1 }}
                exit={{ opacity: 0, scale: 0.9 }}
                className={cn(
-                 "bg-[#1a1a1a] border border-slate-200 dark:border-white/10 p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden",
+                 "bg-[#1a1a1a] border border-slate-200 dark:border-white/10 p-5 rounded-xl shadow-2xl relative overflow-hidden",
                  modalType === 'terminal' ? "w-full max-w-4xl h-[600px]" : "w-full max-w-lg"
                )}
             >
                {modalType === 'terminal' ? (
-                 <div className="flex flex-col h-full gap-6">
+                 <div className="flex flex-col h-full gap-4">
                     <div className="flex items-center justify-between">
                        <div className="flex items-center gap-4">
                           <Terminal className="w-5 h-5 text-blue-500" />
@@ -828,7 +828,7 @@ export function FileManager() {
                        </button>
                     </div>
                     
-                    <div className="flex-1 bg-slate-100 dark:bg-black/60 rounded-2xl border border-slate-200 dark:border-white/5 p-6 font-mono text-xs overflow-y-auto custom-scrollbar text-blue-400">
+                    <div className="flex-1 bg-slate-100 dark:bg-black/60 rounded-xl border border-slate-200 dark:border-white/5 p-4 font-mono text-xs overflow-y-auto custom-scrollbar text-blue-400">
                        {terminalOutput.map((line, i) => (
                          <div key={i} className="whitespace-pre-wrap">{line}</div>
                        ))}
@@ -979,7 +979,7 @@ function ToolbarBtn({ icon, label, onClick, disabled }: { icon: React.ReactNode,
 
 function QuickAction({ icon, label, sub }: { icon: React.ReactNode, label: string, sub: string }) {
   return (
-    <div className="p-5 rounded-3xl bg-white/[0.02] border border-slate-200 dark:border-white/5 hover:border-blue-500/20 hover:bg-blue-500/5 transition-all cursor-pointer group text-left">
+    <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-200 dark:border-white/5 hover:border-blue-500/20 hover:bg-blue-500/5 transition-all cursor-pointer group text-left">
       <div className="w-10 h-10 rounded-2xl bg-slate-200 dark:bg-white/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
         <div className="text-slate-500 group-hover:text-blue-400 transition-colors">{icon}</div>
       </div>

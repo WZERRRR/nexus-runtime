@@ -170,10 +170,10 @@ export function TerminalPage() {
  }
  />
 
- <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0 pb-8 px-1 overflow-hidden">
+ <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 pb-6 px-1 overflow-hidden">
  {/* Servers Sidebar */}
- <div className="lg:col-span-3 flex flex-col gap-6 overflow-hidden">
- <div className="glass-panel p-6 rounded-3xl relative overflow-hidden flex flex-col h-full ">
+ <div className="lg:col-span-3 flex flex-col gap-4 overflow-hidden">
+ <div className="glass-panel p-4 rounded-xl relative overflow-hidden flex flex-col h-full ">
  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 blur-[50px] -mr-16 -mt-16 rounded-full"></div>
  
  <div className="flex items-center justify-between mb-8 relative z-10 text-right">
@@ -183,7 +183,7 @@ export function TerminalPage() {
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">الخوادم النشطة</h3>
  </div>
 
- <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 relative z-10 pr-1">
+ <div className="space-y-2 overflow-y-auto custom-scrollbar flex-1 relative z-10 pr-1">
  {servers.length === 0 ? (
    <div className="text-center py-20 opacity-30">
      <WifiOff className="w-8 h-8 mx-auto mb-3 text-slate-500" />
@@ -196,7 +196,7 @@ export function TerminalPage() {
      whileHover={{ scale: 1.02 }}
      whileTap={{ scale: 0.98 }}
      onClick={() => handleChangeServer(s.id)}
-     className={`w-full text-right p-5 rounded-3xl border transition-all relative overflow-hidden group ${
+     className={`w-full text-right p-3 rounded-xl border transition-all relative overflow-hidden group ${
      activeServer === s.id 
      ? 'bg-blue-600/10 border-blue-500/30' 
      : 'bg-slate-100 dark:bg-black/20 border-slate-200 dark:border-white/5 hover:bg-slate-100 dark:bg-black/40'
@@ -225,7 +225,7 @@ export function TerminalPage() {
  </div>
 
  <div className="mt-8 pt-8 border-t border-slate-200 dark:border-white/5 relative z-10 flex flex-col gap-4">
- <div className="p-5 rounded-3xl bg-blue-500/5 border border-blue-500/10 flex items-start gap-3 flex-row-reverse text-right">
+ <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 flex items-start gap-3 flex-row-reverse text-right">
  <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
  <div>
  <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">تشفير عسكري</p>
@@ -238,9 +238,9 @@ export function TerminalPage() {
 
  {/* Terminal Window */}
  <div className="lg:col-span-9 flex flex-col overflow-hidden">
- <div className={`glass-panel rounded-3xl bg-[#080c14] flex flex-col overflow-hidden relative flex-1 ${isExpanded ? 'fixed inset-4 z-[100] m-0 rounded-3xl' : ''}`}>
+ <div className={`glass-panel rounded-xl bg-[#080c14] flex flex-col overflow-hidden relative flex-1 ${isExpanded ? 'fixed inset-4 z-[100] m-0 rounded-xl' : ''}`}>
  {/* Terminal Header */}
- <div className="p-6 border-b border-slate-200 dark:border-white/5 bg-[#0d121f] flex items-center justify-between shrink-0 px-8">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 bg-[#0d121f] flex items-center justify-between shrink-0 px-5">
  <div className="flex gap-2">
  <div className="w-3 h-3 rounded-full bg-red-500/50"></div>
  <div className="w-3 h-3 rounded-full bg-amber-500/50"></div>

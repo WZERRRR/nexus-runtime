@@ -119,7 +119,7 @@ export function InfrastructureManager() {
  />
 
  {/* Hero Stats */}
- <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 px-1">
+ <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 px-1">
  <HealthMetric 
  label="درجة التنظيم (Score)"
  value={`${score}%`}
@@ -151,7 +151,7 @@ export function InfrastructureManager() {
  </div>
 
  {/* Tabs Layout */}
- <div className="flex flex-col gap-6">
+ <div className="flex flex-col gap-4">
  <div className="flex items-center gap-1 bg-white dark:bg-slate-900/60 p-1.5 rounded-2xl w-fit border border-slate-200 dark:border-white/5">
  <TabButton active={activeTab === 'health'} onClick={() => setActiveTab('health')} icon={<ShieldCheck />} label="فحص الحالة (Health Check)" />
  <TabButton active={activeTab === 'structure'} onClick={() => setActiveTab('structure')} icon={<FolderTree />} label="الهيكلية القياسية" />
@@ -175,13 +175,13 @@ const HealthTab = ({ onAction, recommendations }: { onAction: (m: string) => voi
  initial={{ opacity: 0, y: 10 }}
  animate={{ opacity: 1, y: 0 }}
  exit={{ opacity: 0, y: -10 }}
- className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+ className="grid grid-cols-1 lg:grid-cols-3 gap-4"
  >
  {/* Recommendations List */}
  <div className="lg:col-span-2 space-y-6">
  <h3 className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] pr-2">توصيات ذكية (Smart Suggestions)</h3>
  {recommendations.map((rec) => (
- <div key={rec.id} className="glass-panel p-6 rounded-3xl relative overflow-hidden group">
+ <div key={rec.id} className="glass-panel p-4 rounded-xl relative overflow-hidden group">
  <div className={`absolute top-0 right-0 w-1.5 h-full ${
  rec.level === 'critical' ? 'bg-red-500' : 
  rec.level === 'success' ? 'bg-emerald-500' : 'bg-blue-500'
@@ -211,7 +211,7 @@ const HealthTab = ({ onAction, recommendations }: { onAction: (m: string) => voi
  {/* Storage Analysis */}
  <div className="space-y-6">
  <h3 className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] pr-2">تحليل المساحة (Storage)</h3>
- <div className="glass-panel p-6 rounded-3xl space-y-6 ">
+ <div className="glass-panel p-4 rounded-xl space-y-4 ">
  <div className="flex flex-col items-center justify-center py-4">
  <div className="relative w-32 h-32 flex items-center justify-center">
  <svg className="w-full h-full transform -rotate-90">
@@ -251,7 +251,7 @@ const StructureTab = ({ compliance, score }: { compliance: any[], score: number,
  initial={{ opacity: 0, y: 10 }}
  animate={{ opacity: 1, y: 0 }}
  exit={{ opacity: 0, y: -10 }}
- className="glass-panel rounded-3xl overflow-hidden "
+ className="glass-panel rounded-xl overflow-hidden "
  >
  <div className="px-8 py-6 bg-white dark:bg-slate-900/60 border-b border-slate-200 dark:border-white/5 flex items-center justify-between">
  <div>
@@ -325,9 +325,9 @@ const ConfigTab = ({ onSave, context }: { onSave: () => void, context?: any, key
  initial={{ opacity: 0, y: 10 }}
  animate={{ opacity: 1, y: 0 }}
  exit={{ opacity: 0, y: -10 }}
- className="grid grid-cols-1 lg:grid-cols-2 gap-8"
+ className="grid grid-cols-1 lg:grid-cols-2 gap-4"
  >
- <div className="glass-panel p-6 md:p-8 rounded-3xl space-y-6 ">
+ <div className="glass-panel p-4 md:p-5 rounded-xl space-y-4 ">
  <div className="flex items-center gap-4 mb-2">
  <div className="p-3 bg-blue-600/10 rounded-2xl border border-blue-500/20">
  <FileJson className="w-6 h-6 text-blue-500" />
@@ -337,7 +337,7 @@ const ConfigTab = ({ onSave, context }: { onSave: () => void, context?: any, key
  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">بيانات التعريف والهيكلية الذكية للمشروع</p>
  </div>
  </div>
- <div className="bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-white/5 font-mono text-sm shadow-inner overflow-hidden relative">
+ <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-white/5 font-mono text-sm shadow-inner overflow-hidden relative">
  <div className="absolute top-0 right-0 w-1 bg-blue-500 h-full"></div>
  <pre className="text-blue-400/90 whitespace-pre leading-relaxed scrollbar-hide overflow-x-auto">
 {`{
@@ -368,7 +368,7 @@ const ConfigTab = ({ onSave, context }: { onSave: () => void, context?: any, key
 
  <div className="space-y-6">
  <h3 className="text-sm font-black text-slate-500 uppercase tracking-[0.2em] pr-2">أذونات النظام (Permissions Monitoring)</h3>
- <div className="glass-panel p-6 md:p-8 rounded-3xl space-y-6 ">
+ <div className="glass-panel p-4 md:p-5 rounded-xl space-y-4 ">
  <div className="space-y-6">
  <PermissionItem label="Root Access" status="System Managed" value="755" healthy />
  <PermissionItem label="Logs Write Access" status="Public Write" value="777" healthy={false} />
@@ -388,7 +388,7 @@ const ConfigTab = ({ onSave, context }: { onSave: () => void, context?: any, key
 );
 
 const HealthMetric = ({ label, value, desc, icon, color }: any) => (
- <div className="glass-panel p-6 rounded-3xl group hover:bg-white/[0.03] transition-all relative overflow-hidden">
+ <div className="glass-panel p-4 rounded-xl group hover:bg-white/[0.03] transition-all relative overflow-hidden">
  <div className={`absolute -right-6 -top-6 w-24 h-24 blur-3xl opacity-0 group-hover:opacity-40 transition-opacity ${
  color === 'blue' ? 'bg-blue-500/10' : color === 'emerald' ? 'bg-emerald-500/10' : color === 'red' ? 'bg-red-500/10' : 'bg-purple-500/10'
  }`}></div>
