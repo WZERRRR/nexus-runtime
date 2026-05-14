@@ -112,11 +112,11 @@ export function SecurityCenter() {
  />
  </div>
 
- <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+ <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0">
  {/* Main Security Area */}
- <div className="lg:col-span-8 flex flex-col gap-6 overflow-hidden">
+ <div className="lg:col-span-8 flex flex-col gap-4 overflow-hidden">
  {/* Threat Analysis Chart */}
- <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden flex flex-col">
+ <div className="glass-panel p-4 md:p-5 rounded-xl relative overflow-hidden flex flex-col">
  <div className="absolute top-0 right-0 w-96 h-96 bg-red-500/5 blur-[100px] -mr-48 -mt-24 rounded-full"></div>
  
  <div className="flex items-center justify-between mb-10 relative z-10">
@@ -168,8 +168,8 @@ export function SecurityCenter() {
  </div>
 
  {/* Security Logs */}
- <div className="glass-panel rounded-3xl overflow-hidden flex flex-col flex-1">
- <div className="p-6 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-8 shrink-0">
+ <div className="glass-panel rounded-xl overflow-hidden flex flex-col flex-1">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-5 shrink-0">
  <div className="flex items-center gap-3">
  <Terminal className="w-4 h-4 text-red-500" />
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">سجل الأحداث الأمنية اللحظي</h3>
@@ -232,9 +232,9 @@ export function SecurityCenter() {
  </div>
 
  {/* Security Controls Sidebar */}
- <div className="lg:col-span-4 flex flex-col gap-6 overflow-hidden">
+ <div className="lg:col-span-4 flex flex-col gap-4 overflow-hidden">
  {/* Security Compliance Card */}
- <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden group">
+ <div className="glass-panel p-4 md:p-5 rounded-xl relative overflow-hidden group">
  <div className="absolute top-0 left-0 w-32 h-32 bg-blue-500/10 blur-[50px] -ml-16 -mt-16 rounded-full group-hover:bg-blue-500/20 transition-all"></div>
  
  <div className="flex items-center justify-between mb-8 relative z-10">
@@ -257,17 +257,17 @@ export function SecurityCenter() {
  </div>
 
  {/* WAF Policy Table */}
- <div className="glass-panel rounded-3xl overflow-hidden flex flex-col flex-1">
- <div className="p-6 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-8">
+ <div className="glass-panel rounded-xl overflow-hidden flex flex-col flex-1">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-5">
  <div className="flex items-center gap-2">
  <Box className="w-4 h-4 text-orange-400" />
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">سياسات WAF</h3>
  </div>
  <Plus className="w-4 h-4 text-slate-500 hover:text-white cursor-pointer transition-colors" />
  </div>
- <div className="p-4 space-y-3 overflow-auto custom-scrollbar">
+ <div className="p-3 space-y-2 overflow-auto custom-scrollbar">
  {WAF_RULES.map((rule) => (
- <div key={rule.id} className="p-4 rounded-3xl bg-slate-200 dark:bg-white/5 border border-slate-200 dark:border-white/5 hover:border-slate-200 dark:border-white/10 transition-all group">
+ <div key={rule.id} className="p-3 rounded-xl bg-slate-200 dark:bg-white/5 border border-slate-200 dark:border-white/5 hover:border-slate-200 dark:border-white/10 transition-all group">
  <div className="flex justify-between items-start mb-3">
  <div>
  <h4 className="text-[11px] font-black text-white uppercase tracking-tight group-hover:text-blue-400 transition-colors text-right">{rule.name}</h4>

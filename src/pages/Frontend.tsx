@@ -93,22 +93,22 @@ export function FrontendCenter() {
  ))}
  </div>
 
- <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
  
  {/* Bundle Size Monitor */}
  <motion.div 
  initial={{ opacity: 0, x: -20 }}
  animate={{ opacity: 1, x: 0 }}
- className="glass-panel rounded-3xl /50 lg:col-span-2 flex flex-col overflow-hidden"
+ className="glass-panel rounded-xl /50 lg:col-span-2 flex flex-col overflow-hidden"
  >
- <div className="p-6 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
  <h3 className="font-bold text-white flex items-center gap-3">
  <FileCode2 className="w-5 h-5 text-emerald-400" />
  مراقب حجم التطبيق (Bundle Size Tracking)
  </h3>
  <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/5 shadow-inner uppercase tracking-wider">Project: admin-frontend</span>
  </div>
- <div className="p-6">
+ <div className="p-4">
  <div className="grid grid-cols-3 gap-4 mb-8">
  <div className="bg-slate-50 dark:bg-slate-950/40 p-5 rounded-2xl border border-slate-200 dark:border-white/5 shadow-inner group hover:border-emerald-500/20 transition-all">
  <p className="text-slate-500 text-xs font-bold mb-2 uppercase tracking-wide">First Load JS</p>
@@ -150,15 +150,15 @@ export function FrontendCenter() {
  <motion.div 
  initial={{ opacity: 0, x: 20 }}
  animate={{ opacity: 1, x: 0 }}
- className="glass-panel rounded-3xl /50 lg:col-span-1 flex flex-col overflow-hidden"
+ className="glass-panel rounded-xl /50 lg:col-span-1 flex flex-col overflow-hidden"
  >
- <div className="p-6 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
  <h3 className="font-bold text-white flex items-center gap-3">
  <Globe className="w-5 h-5 text-orange-400" />
  أخطاء المتصفح (Runtime Errors)
  </h3>
  </div>
- <div className="p-6 flex-1 bg-slate-50 dark:bg-slate-950/20">
+ <div className="p-4 flex-1 bg-slate-50 dark:bg-slate-950/20">
  <div className="space-y-4">
  
  <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-2xl group transition-all hover:bg-red-500/10">

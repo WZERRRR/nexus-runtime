@@ -223,15 +223,15 @@ export function MobileAppsCenter() {
  animate={{ opacity: 1, y: 0 }}
  transition={{ delay: idx * 0.1 }}
  key={app.id} 
- className={`glass-panel rounded-3xl p-6 border transition-all ${
+ className={`glass-panel rounded-xl p-4 border transition-all ${
  app.status === 'online' ? 'border-slate-200 dark:border-white/5 hover:border-pink-500/30' : 'border-orange-500/20'
  } group/card relative overflow-hidden shadow-xl`}
  >
  <div className="absolute top-0 left-0 w-1 h-full bg-pink-600 opacity-0 group-hover/card:opacity-100 transition-opacity"></div>
  
- <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-8 relative z-10">
+ <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 relative z-10">
  
- <div className="flex items-center gap-6">
+ <div className="flex items-center gap-4">
  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border shadow-inner ${
  app.platform.includes('Apple') || app.platform.includes('iOS') ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-white/10 text-white' :
  app.platform.includes('Android') ? 'bg-green-500/5 border-green-500/20 text-green-500' :
@@ -254,7 +254,7 @@ export function MobileAppsCenter() {
  </div>
  </div>
 
- <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 flex-1 xl:px-10 xl:border-x border-slate-200 dark:border-white/5">
+ <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1 xl:px-6 xl:border-x border-slate-200 dark:border-white/5">
  <div className="group/item">
  <p className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest group-hover/item:text-blue-400 transition-colors">API Endpoint</p>
  <p className="text-sm font-mono font-bold text-blue-300 truncate tracking-tight shadow-sm" title={app.apiEndpoint}>{app.apiEndpoint}</p>
@@ -316,9 +316,9 @@ export function MobileAppsCenter() {
  initial={{ scale: 0.9, opacity: 0, y: 20 }}
  animate={{ scale: 1, opacity: 1, y: 0 }}
  exit={{ scale: 0.9, opacity: 0, y: 20 }}
- className="relative w-full max-w-lg glass-panel p-1 rounded-3xl overflow-hidden"
+ className="relative w-full max-w-lg glass-panel p-1 rounded-xl overflow-hidden"
  >
- <div className="p-8 bg-white dark:bg-slate-900/60 rounded-[2.2rem]">
+ <div className="p-5 bg-white dark:bg-slate-900/60 rounded-xl">
  <div className="flex justify-between items-center mb-8">
  <h2 className="text-2xl font-black text-white flex items-center gap-3">
  <div className="p-2 bg-pink-500/10 rounded-xl border border-pink-500/20">
@@ -394,9 +394,9 @@ export function MobileAppsCenter() {
  initial={{ scale: 0.9, opacity: 0, y: 20 }}
  animate={{ scale: 1, opacity: 1, y: 0 }}
  exit={{ scale: 0.9, opacity: 0, y: 20 }}
- className="relative w-full max-w-lg glass-panel p-1 rounded-3xl overflow-hidden"
+ className="relative w-full max-w-lg glass-panel p-1 rounded-xl overflow-hidden"
  >
- <div className="p-8 bg-white dark:bg-slate-900/60 rounded-[2.2rem]">
+ <div className="p-5 bg-white dark:bg-slate-900/60 rounded-xl">
  <div className="flex justify-between items-center mb-8">
  <h2 className="text-2xl font-black text-white flex items-center gap-3">
  <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20">

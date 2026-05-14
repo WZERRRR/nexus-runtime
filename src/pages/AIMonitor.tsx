@@ -135,10 +135,10 @@ export function AIMonitor() {
  />
  </div>
 
- <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+ <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0">
  {/* Neural Analysis Chart */}
- <div className="lg:col-span-8 flex flex-col gap-6 overflow-hidden">
- <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden flex flex-col ">
+ <div className="lg:col-span-8 flex flex-col gap-4 overflow-hidden">
+ <div className="glass-panel p-4 md:p-5 rounded-xl relative overflow-hidden flex flex-col ">
  <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/5 blur-[100px] -mr-48 -mt-24 rounded-full"></div>
  
  <div className="flex items-center justify-between mb-10 relative z-10 font-sans">
@@ -186,8 +186,8 @@ export function AIMonitor() {
  </div>
 
  {/* AI Action Logs */}
- <div className="glass-panel rounded-3xl overflow-hidden flex flex-col flex-1">
- <div className="p-6 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-8 shrink-0">
+ <div className="glass-panel rounded-xl overflow-hidden flex flex-col flex-1">
+ <div className="p-4 border-b border-slate-200 dark:border-white/5 bg-white dark:bg-slate-900/60 flex items-center justify-between px-5 shrink-0">
  <div className="flex items-center gap-3">
  <Binary className="w-4 h-4 text-blue-500" />
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em] font-sans">سجل القرارات الذكية (Neural Logs)</h3>
@@ -238,8 +238,8 @@ export function AIMonitor() {
  </div>
 
  {/* AI Insights Sidebar */}
- <div className="lg:col-span-4 flex flex-col gap-6 overflow-hidden">
- <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden group shrink-0">
+ <div className="lg:col-span-4 flex flex-col gap-4 overflow-hidden">
+ <div className="glass-panel p-4 md:p-5 rounded-xl relative overflow-hidden group shrink-0">
  <div className="absolute top-0 left-0 w-32 h-32 bg-purple-500/10 blur-[50px] -ml-16 -mt-16 rounded-full"></div>
  
  <div className="flex items-center justify-between mb-8 relative z-10 font-sans">
@@ -252,7 +252,7 @@ export function AIMonitor() {
  <motion.div 
  key={insight.id}
  whileHover={{ scale: 1.02 }}
- className={`p-5 rounded-3xl border transition-all cursor-pointer ${
+ className={`p-3 rounded-xl border transition-all cursor-pointer ${
  insight.priority === 'critical' ? 'bg-red-500/5 border-red-500/20' : 
  insight.priority === 'high' ? 'bg-blue-500/5 border-blue-500/20' : 
  'bg-slate-200 dark:bg-white/5 border-slate-200 dark:border-white/5'
@@ -280,7 +280,7 @@ export function AIMonitor() {
  </div>
 
  {/* Neural Learning Progress */}
- <div className="glass-panel p-6 md:p-8 rounded-3xl flex-1 flex flex-col font-sans">
+ <div className="glass-panel p-4 md:p-5 rounded-xl flex-1 flex flex-col font-sans">
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em] mb-8 flex items-center gap-2">
  <Fingerprint className="w-4 h-4 text-blue-400" /> تقدم التعلم الذاتي
  </h3>
@@ -341,7 +341,7 @@ function InsightCard({ icon, title, value, sub, trend, status, type = 'blue' }: 
  return (
  <motion.div 
  whileHover={{ y: -4 }}
- className="glass-panel p-5 rounded-3xl relative overflow-hidden group font-sans"
+ className="glass-panel p-4 rounded-xl relative overflow-hidden group font-sans"
  >
  <div className={`absolute top-0 right-0 w-24 h-24 blur-[40px] opacity-20 -mr-12 -mt-12 rounded-full transition-all group-hover:opacity-40 animate-pulse ${getColors().split(' ')[0]}`}></div>
  <div className="flex justify-between items-start relative z-10 mb-4">
