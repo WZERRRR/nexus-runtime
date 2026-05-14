@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import Editor, { DiffEditor } from '@monaco-editor/react';
 import { 
   X, Square, Minus, Check, Layers, RefreshCw, Search, FileText, 
   Navigation, Type, Palette, Settings, Command, Folder, File, 
@@ -14,6 +15,7 @@ interface OpenFile {
   type: 'file' | 'folder';
   path: string;
   content: string;
+  originalContent: string;
   isDirty: boolean;
 }
 
@@ -46,25 +48,38 @@ export function TextEditorModal({
   const isMaskedSensitiveFile = activeFile?.content?.trim?.() === '*** MASKED SENSITIVE FILE ***';
   
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [diffMode, setDiffMode] = useState(false);
+  const [editorWarning, setEditorWarning] = useState<string | null>(null);
+  const [language, setLanguage] = useState('plaintext');
+  const isLargeFile = (activeFile?.content?.length || 0) > 1024 * 512;
   
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (!activeFile) return;
-    const newContent = e.target.value;
-    setOpenFiles(prev => prev.map(f => f.path === activeFilePath ? { ...f, content: newContent, isDirty: true } : f));
+  const mapLanguageFromPath = (filePath?: string) => {
+    if (!filePath) return 'plaintext';
+    const lower = filePath.toLowerCase();
+    if (lower.endsWith('.ts')) return 'typescript';
+    if (lower.endsWith('.tsx')) return 'typescript';
+    if (lower.endsWith('.js') || lower.endsWith('.jsx')) return 'javascript';
+    if (lower.endsWith('.json')) return 'json';
+    if (lower.endsWith('.yml') || lower.endsWith('.yaml')) return 'yaml';
+    if (lower.endsWith('.env')) return 'shell';
+    if (lower.endsWith('.sql')) return 'sql';
+    if (lower.endsWith('.php')) return 'php';
+    if (lower.endsWith('.md')) return 'markdown';
+    if (lower.endsWith('.dart')) return 'dart';
+    return 'plaintext';
   };
 
-  const handleSelectionChange = () => {
-    if (!textareaRef.current) return;
-    const text = textareaRef.current.value;
-    const pos = textareaRef.current.selectionStart;
-    const lines = text.slice(0, pos).split('\n');
-    setCursorPos({
-      line: lines.length,
-      col: lines[lines.length - 1].length + 1
-    });
-  };
+  useEffect(() => {
+    setLanguage(mapLanguageFromPath(activeFile?.path));
+    if (isMaskedSensitiveFile) {
+      setEditorWarning('Sensitive file is masked and read-only by governance.');
+    } else if (isLargeFile) {
+      setEditorWarning('Large file protection enabled. Diff mode may impact performance.');
+    } else {
+      setEditorWarning(null);
+    }
+  }, [activeFile?.path, isMaskedSensitiveFile, isLargeFile]);
 
   const handleSave = async (filePath: string) => {
     const file = openFiles.find(f => f.path === filePath);
@@ -83,7 +98,7 @@ export function TextEditorModal({
     }
     try {
       await runtimeAPI.writeFile(file.path, file.content, projectRoot, projectId);
-      setOpenFiles(prev => prev.map(f => f.path === filePath ? { ...f, isDirty: false } : f));
+      setOpenFiles(prev => prev.map(f => f.path === filePath ? { ...f, isDirty: false, originalContent: f.content } : f));
     } catch (e) {
       console.error(e);
     }
@@ -107,8 +122,6 @@ export function TextEditorModal({
   };
 
   if (!activeFilePath && openFiles.length === 0) return null;
-
-  const contentLines = activeFile ? activeFile.content.split('\n') : [];
 
   return createPortal(
     <motion.div 
@@ -145,7 +158,7 @@ export function TextEditorModal({
           <ToolbarBtn icon={<RefreshCw className="w-3.5 h-3.5" />} label="Refresh" onClick={() => activeFile && handleSave(activeFile.path)} />
           <div className="w-px h-5 bg-slate-200 dark:bg-white/10 mx-2" />
           <ToolbarBtn icon={<Search className="w-3.5 h-3.5" />} label="Search" />
-          <ToolbarBtn icon={<FileText className="w-3.5 h-3.5" />} label="Replace" />
+          <ToolbarBtn icon={<FileText className="w-3.5 h-3.5" />} label={diffMode ? "Diff On" : "Diff Off"} onClick={() => setDiffMode(v => !v)} />
           <div className="w-px h-5 bg-slate-200 dark:bg-white/10 mx-2" />
           <ToolbarBtn icon={<Navigation className="w-3.5 h-3.5" />} label="Jump Line" />
           <ToolbarBtn icon={<Type className="w-3.5 h-3.5" />} label="Font Size" />
@@ -229,25 +242,55 @@ export function TextEditorModal({
             {/* Text Area */}
             {activeFile ? (
               <div className="flex-1 flex overflow-hidden bg-[#1e1e1e] relative">
-                {/* Line Numbers */}
-                <div className="w-12 shrink-0 bg-[#1e1e1e] border-r border-[#333] text-[#858585] font-mono text-[14px] pt-[0.25rem] text-right pr-3 select-none overflow-hidden h-full z-10 break-all">
-                  {contentLines.map((_, i) => (
-                    <div key={i} className="leading-[1.4rem]">{i + 1}</div>
-                  ))}
+                <div className="absolute top-2 right-3 z-10">
+                  {editorWarning && <span className="text-[10px] font-bold text-amber-400">{editorWarning}</span>}
                 </div>
-                {/* Editor Content */}
-                <textarea
-                  ref={textareaRef}
-                  value={activeFile.content}
-                  onChange={handleTextChange}
-                  onSelect={handleSelectionChange}
-                  onClick={handleSelectionChange}
-                  onKeyUp={handleSelectionChange}
-                  spellCheck={false}
-                  readOnly={isMaskedSensitiveFile}
-                  className="flex-1 bg-transparent p-1 pl-3 font-mono text-[14px] leading-[1.4rem] text-[#d4d4d4] resize-none outline-none whitespace-pre overflow-auto h-full"
-                  style={{ tabSize: 4 }}
-                />
+                {diffMode && !isLargeFile ? (
+                  <DiffEditor
+                    original={activeFile.originalContent}
+                    modified={activeFile.content}
+                    language={language}
+                    theme="vs-dark"
+                    height="100%"
+                    options={{
+                      readOnly: isMaskedSensitiveFile,
+                      renderSideBySide: true,
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                    }}
+                    onChange={(value) => {
+                      if (typeof value !== 'string' || isMaskedSensitiveFile) return;
+                      setOpenFiles(prev =>
+                        prev.map(f => (f.path === activeFilePath ? { ...f, content: value, isDirty: value !== f.originalContent } : f))
+                      );
+                    }}
+                  />
+                ) : (
+                  <Editor
+                    value={activeFile.content}
+                    language={language}
+                    theme="vs-dark"
+                    height="100%"
+                    options={{
+                      readOnly: isMaskedSensitiveFile,
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      automaticLayout: true,
+                      wordWrap: 'on',
+                    }}
+                    onChange={(value) => {
+                      if (typeof value !== 'string' || isMaskedSensitiveFile) return;
+                      setOpenFiles(prev =>
+                        prev.map(f => (f.path === activeFilePath ? { ...f, content: value, isDirty: value !== f.originalContent } : f))
+                      );
+                    }}
+                    onMount={(editor) => {
+                      editor.onDidChangeCursorPosition((evt) => {
+                        setCursorPos({ line: evt.position.lineNumber, col: evt.position.column });
+                      });
+                    }}
+                  />
+                )}
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center p-8 text-center text-slate-500">

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^12.9.0",
@@ -20,6 +21,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
+    "monaco-editor": "^0.55.1",
     "motion": "^12.23.24",
     "mysql2": "^3.22.3",
     "node-cache": "^5.1.2",

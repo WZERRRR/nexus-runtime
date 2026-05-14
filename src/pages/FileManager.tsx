@@ -30,6 +30,7 @@ interface RuntimeFile {
 
 interface OpenFile extends RuntimeFile {
   content: string;
+  originalContent: string;
   isDirty: boolean;
 }
 
@@ -212,7 +213,7 @@ export function FileManager() {
 
     try {
       const data = await runtimeAPI.readFile(item.path, projectRoot, projectId);
-      const newFile: OpenFile = { ...item, content: data, isDirty: false };
+      const newFile: OpenFile = { ...item, content: data, originalContent: data, isDirty: false };
       setOpenFiles(prev => [...prev, newFile]);
       setActiveFilePath(item.path);
     } catch (e) {
