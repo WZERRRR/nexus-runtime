@@ -578,20 +578,71 @@ async function runRuntimeVerificationGates(project: any, runCommand: (command: s
   };
 }
 
-function triggerGovernedAutoRecovery(runtimeId: string, snapshotId: string, reason: string) {
+async function executeGovernedAutoRecovery(
+  runtimeId: string,
+  snapshotId: string,
+  reason: string,
+  project: any,
+  runCommand: (command: string, cwd: string, timeout?: number) => Promise<{ stdout: string; stderr: string; error: string | null }>
+) {
   const recoveryId = `auto-rec-${Date.now()}`;
+  const timeline: Array<{ stage: string; status: 'ok' | 'failed' | 'skipped'; output?: string; error?: string; timestamp: string }> = [];
+  const pushStage = (stage: string, status: 'ok' | 'failed' | 'skipped', output?: string, error?: string) => {
+    timeline.push({ stage, status, output, error, timestamp: new Date().toISOString() });
+  };
   try {
     sqliteDb.prepare(`
       INSERT INTO runtime_recovery
       (recovery_id, runtime_id, snapshot_id, recovery_type, recovery_status, risk_level, requested_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(recoveryId, runtimeId, snapshotId, 'AUTO_RECOVERY', 'PENDING', 'high', 'GovernanceEngine');
+    `).run(recoveryId, runtimeId, snapshotId, 'AUTO_RECOVERY', 'RUNNING', 'high', 'GovernanceEngine');
     addGovernanceAction('AUTO_RUNTIME_RECOVERY', 'GovernanceEngine', runtimeId, 'TRIGGERED');
     addRuntimeLog('error', `[auto-recovery:${recoveryId}] Triggered for runtime ${runtimeId}. Reason: ${reason}`, 'recovery_runtime');
+
+    const snap = sqliteDb.prepare('SELECT * FROM runtime_snapshots WHERE snapshot_id = ? AND runtime_id = ?').get(snapshotId, runtimeId) as any;
+    if (!snap) {
+      pushStage('Snapshot Validation', 'failed', undefined, 'Snapshot not found for auto recovery');
+      sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('FAILED', recoveryId);
+      return { success: false, recoveryId, timeline, error: 'Snapshot not found for auto recovery' };
+    }
+    pushStage('Snapshot Validation', 'ok', `Snapshot ${snapshotId} validated`);
+
+    const target = project?.runtime_process ? String(project.runtime_process) : 'all';
+    const stopRes = await runCommand(`npx -y pm2 stop ${target}`, project.runtime_path, 120000);
+    if (stopRes.error) {
+      pushStage('PM2 Stop', 'failed', `${stopRes.stdout}\n${stopRes.stderr}`, stopRes.error);
+      sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('FAILED', recoveryId);
+      return { success: false, recoveryId, timeline, error: stopRes.error };
+    }
+    pushStage('PM2 Stop', 'ok', stopRes.stdout);
+
+    const restartRes = await runCommand(`npx -y pm2 restart ${target}`, project.runtime_path, 120000);
+    if (restartRes.error) {
+      pushStage('PM2 Restart', 'failed', `${restartRes.stdout}\n${restartRes.stderr}`, restartRes.error);
+      sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('FAILED', recoveryId);
+      return { success: false, recoveryId, timeline, error: restartRes.error };
+    }
+    pushStage('PM2 Restart', 'ok', restartRes.stdout);
+
+    const verification = await runRuntimeVerificationGates(project, runCommand);
+    if (!verification.ok) {
+      pushStage('Runtime Verification Gates', 'failed', JSON.stringify(verification.details || {}), `${verification.code}: ${verification.reason}`);
+      sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('FAILED', recoveryId);
+      return { success: false, recoveryId, timeline, error: `${verification.code}: ${verification.reason}` };
+    }
+    pushStage('Runtime Verification Gates', 'ok', JSON.stringify(verification.details || {}));
+
+    sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('READY', recoveryId);
+    addGovernanceAction('AUTO_RUNTIME_RECOVERY', 'GovernanceEngine', runtimeId, 'COMPLETED');
+    addRuntimeLog('success', `[auto-recovery:${recoveryId}] Completed for runtime ${runtimeId}`, 'recovery_runtime');
+    return { success: true, recoveryId, timeline };
   } catch (e: any) {
-    addRuntimeLog('error', `Auto recovery trigger failed for runtime ${runtimeId}: ${e.message}`, 'recovery_runtime');
+    try {
+      sqliteDb.prepare('UPDATE runtime_recovery SET recovery_status = ? WHERE recovery_id = ?').run('FAILED', recoveryId);
+    } catch {}
+    addRuntimeLog('error', `Auto recovery execution failed for runtime ${runtimeId}: ${e.message}`, 'recovery_runtime');
+    return { success: false, recoveryId, timeline, error: e.message };
   }
-  return recoveryId;
 }
 
 function updatePendingMutationExecution(approvalId: string, status: 'COMPLETED' | 'FAILED', result: any) {
@@ -4367,11 +4418,11 @@ async function startServer() {
       await runStage('Runtime Verification Gates', async () => {
         const verification = await runRuntimeVerificationGates(project, runCommand);
         if (!verification.ok) {
-          const autoRecoveryId = triggerGovernedAutoRecovery(runtimeId, snapshotId, verification.reason);
+          const autoRecovery = await executeGovernedAutoRecovery(runtimeId, snapshotId, verification.reason, project, runCommand);
           return {
             status: 'failed',
             error: `${verification.code}: ${verification.reason}`,
-            output: `Auto recovery triggered: ${autoRecoveryId}`
+            output: `Auto recovery ${autoRecovery.success ? 'completed' : 'failed'}: ${autoRecovery.recoveryId}`
           };
         }
         return { status: 'ok', output: JSON.stringify(verification.details || {}) };
