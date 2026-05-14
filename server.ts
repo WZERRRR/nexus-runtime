@@ -1032,11 +1032,20 @@ async function startServer() {
     projectId?: string;
     paused: boolean;
   };
+  type RuntimeMutationClient = {
+    ws: WebSocket;
+    runtimeId?: string;
+    projectId?: string;
+    paused: boolean;
+    deliveredKeys: Set<string>;
+  };
 
   const wsServer = new WebSocketServer({ server, path: "/ws/runtime/logs" });
   const telemetryWsServer = new WebSocketServer({ server, path: "/ws/runtime/telemetry" });
+  const mutationWsServer = new WebSocketServer({ server, path: "/ws/runtime/mutations" });
   const streamClients = new Set<RuntimeStreamClient>();
   const telemetryClients = new Set<RuntimeTelemetryClient>();
+  const mutationClients = new Set<RuntimeMutationClient>();
 
   const normalizeRuntimeLog = (row: any, fallbackService = 'runtime') => ({
     id: String(row?.id ?? `${row?.timestamp ?? Date.now()}`),
@@ -1244,11 +1253,104 @@ async function startServer() {
     });
   }, 3000);
 
+  const toMutationEntry = (row: any, source: string) => ({
+    id: String(row?.id || row?.deployment_id || row?.recovery_id || row?.snapshot_id || `${source}-${row?.created_at || Date.now()}`),
+    source,
+    status: String(row?.status || row?.deploy_status || row?.recovery_status || row?.severity || row?.level || 'unknown'),
+    label: String(row?.action_type || row?.deploy_strategy || row?.recovery_type || row?.event_type || row?.type || source),
+    message: String(row?.message || row?.target || row?.details || row?.risk_level || ''),
+    runtimeId: String(row?.runtime_id || row?.runtimeId || ''),
+    timestamp: row?.created_at || row?.updated_at || row?.timestamp || new Date().toISOString(),
+  });
+
+  const streamRuntimeMutations = async (client: RuntimeMutationClient) => {
+    if (client.paused || client.ws.readyState !== WebSocket.OPEN) return;
+    const runtimeId = client.runtimeId ? String(client.runtimeId) : '';
+
+    const [deployments, recoveries, governanceRows, eventRows] = await Promise.all([
+      withTimeout(Promise.resolve(runtimeId ? RuntimeDeploy.getDeployments(runtimeId) : Promise.resolve([])).catch(() => []), 2500, [] as any[]),
+      withTimeout(Promise.resolve(runtimeId ? RuntimeRecovery.getRecoveries(runtimeId) : Promise.resolve([])).catch(() => []), 2500, [] as any[]),
+      withTimeout(getDbGovernanceActions().catch(() => []), 2500, [] as any[]),
+      withTimeout((async () => {
+        try {
+          if (!runtimeId) return [];
+          const { RuntimeEvents } = await import('./server/runtime/runtimeEvents.js');
+          return await RuntimeEvents.getEvents(runtimeId, 30);
+        } catch {
+          return [];
+        }
+      })(), 2500, [] as any[]),
+    ]);
+
+    const merged = [
+      ...(deployments || []).map((row: any) => toMutationEntry(row, 'deploy')),
+      ...(recoveries || []).map((row: any) => toMutationEntry(row, 'recovery')),
+      ...(governanceRows || []).map((row: any) => toMutationEntry(row, 'governance')),
+      ...(eventRows || []).map((row: any) => toMutationEntry(row, 'runtime')),
+    ]
+      .filter((row) => !runtimeId || !row.runtimeId || row.runtimeId === runtimeId)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    const delta = merged.filter((entry) => {
+      const key = `${entry.id}:${entry.timestamp}:${entry.source}:${entry.status}`;
+      if (client.deliveredKeys.has(key)) return false;
+      client.deliveredKeys.add(key);
+      return true;
+    });
+
+    if (client.deliveredKeys.size > 4000) {
+      const lastKeys = Array.from(client.deliveredKeys).slice(-1500);
+      client.deliveredKeys = new Set(lastKeys);
+    }
+
+    if (delta.length > 0) {
+      client.ws.send(JSON.stringify({ type: 'mutations', data: delta }));
+    }
+  };
+
+  mutationWsServer.on("connection", (ws) => {
+    const client: RuntimeMutationClient = { ws, paused: false, deliveredKeys: new Set<string>() };
+    mutationClients.add(client);
+    ws.send(JSON.stringify({ type: "ready", data: { stream: "runtime-mutations" } }));
+
+    ws.on("message", async (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "subscribe") {
+          client.runtimeId = msg.runtimeId ? String(msg.runtimeId) : undefined;
+          client.projectId = msg.projectId ? String(msg.projectId) : undefined;
+          client.deliveredKeys.clear();
+          await streamRuntimeMutations(client);
+          return;
+        }
+        if (msg.type === "pause") client.paused = true;
+        if (msg.type === "resume") {
+          client.paused = false;
+          await streamRuntimeMutations(client);
+        }
+      } catch {
+        ws.send(JSON.stringify({ type: "error", message: "Invalid mutation stream message format" }));
+      }
+    });
+
+    ws.on("close", () => {
+      mutationClients.delete(client);
+    });
+  });
+
+  const mutationTicker = setInterval(() => {
+    mutationClients.forEach((client) => {
+      streamRuntimeMutations(client).catch(() => undefined);
+    });
+  }, 2500);
+
   server.on("close", () => {
     clearInterval(streamTicker);
     clearInterval(telemetryTicker);
+    clearInterval(mutationTicker);
     wsServer.close();
     telemetryWsServer.close();
+    mutationWsServer.close();
   });
 
   app.delete("/api/runtime/nodes/:nodeId", async (req, res) => {

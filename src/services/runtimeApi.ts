@@ -34,6 +34,61 @@ export interface RuntimeLog {
 }
 
 class RuntimeAPI {
+  connectMutationStream(
+    handlers: {
+      onOpen?: () => void;
+      onData?: (payload: any[]) => void;
+      onError?: (message: string) => void;
+      onClose?: () => void;
+    },
+    options?: {
+      runtimeId?: string;
+      projectId?: string;
+      paused?: boolean;
+    }
+  ) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/runtime/mutations`);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        runtimeId: options?.runtimeId,
+        projectId: options?.projectId,
+      }));
+      if (options?.paused) {
+        ws.send(JSON.stringify({ type: 'pause' }));
+      }
+      handlers.onOpen?.();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'mutations' && Array.isArray(payload.data)) {
+          handlers.onData?.(payload.data);
+        } else if (payload.type === 'error') {
+          handlers.onError?.(payload.message || 'Mutation stream error');
+        }
+      } catch {
+        handlers.onError?.('Invalid mutation stream payload');
+      }
+    };
+
+    ws.onerror = () => handlers.onError?.('Mutation stream connection failed');
+    ws.onclose = () => handlers.onClose?.();
+
+    return {
+      pause: () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pause' }));
+      },
+      resume: () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resume' }));
+      },
+      close: () => ws.close(),
+    };
+  }
+
   connectTelemetryStream(
     handlers: {
       onOpen?: () => void;

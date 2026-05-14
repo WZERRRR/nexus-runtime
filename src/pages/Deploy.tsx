@@ -36,6 +36,7 @@ export function Deploy() {
   const [recoveries, setRecoveries] = useState<any[]>([]);
   const [governance, setGovernance] = useState<any[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<any[]>([]);
+  const [mutationStream, setMutationStream] = useState<any[]>([]);
   const [deployResult, setDeployResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +63,25 @@ export function Deploy() {
   useEffect(() => {
     loadData();
   }, [runtimeId]);
+
+  useEffect(() => {
+    if (!runtimeId) return;
+    const stream = runtimeAPI.connectMutationStream(
+      {
+        onData: (rows) => {
+          setMutationStream((prev) => {
+            const map = new Map(prev.map((item: any) => [`${item.id}:${item.timestamp}:${item.source}`, item]));
+            rows.forEach((item: any) => {
+              map.set(`${item.id}:${item.timestamp}:${item.source}`, item);
+            });
+            return Array.from(map.values()).slice(-200);
+          });
+        },
+      },
+      { runtimeId: String(runtimeId), projectId: context?.id ? String(context.id) : undefined },
+    );
+    return () => stream.close();
+  }, [runtimeId, context?.id]);
 
   const runDeploy = async () => {
     if (!runtimeId || isRunning) return;
@@ -126,11 +146,21 @@ export function Deploy() {
       ts: e.created_at || e.timestamp || null,
       duration: null,
     }));
-    const all = [...stageRows, ...deployRows, ...recoveryRows, ...govRows, ...runtimeRows]
+    const streamRows = mutationStream.map((m: any, i: number) => ({
+      id: `ws-${m.id || i}`,
+      source: m.source || 'runtime',
+      label: m.label || m.type || 'mutation',
+      status: m.status || 'unknown',
+      message: m.message || '',
+      ts: m.timestamp || null,
+      duration: null,
+    }));
+
+    const all = [...stageRows, ...deployRows, ...recoveryRows, ...govRows, ...runtimeRows, ...streamRows]
       .sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime());
     if (filter === 'all') return all.slice(0, 120);
     return all.filter((row) => row.source === filter).slice(0, 120);
-  }, [timeline, history, recoveries, governance, runtimeEvents, filter]);
+  }, [timeline, history, recoveries, governance, runtimeEvents, mutationStream, filter]);
 
   const failedStages = useMemo(() => timeline.filter((s) => s.status === 'failed').length, [timeline]);
   const completedStages = useMemo(() => timeline.filter((s) => s.status === 'ok').length, [timeline]);

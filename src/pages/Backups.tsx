@@ -33,6 +33,7 @@ export function BackupCenter() {
   const [recoveries, setRecoveries] = useState<any[]>([]);
   const [governance, setGovernance] = useState<any[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<any[]>([]);
+  const [mutationStream, setMutationStream] = useState<any[]>([]);
   const [selectedSnapshot, setSelectedSnapshot] = useState<string>('');
   const [rollbackResult, setRollbackResult] = useState<any>(null);
   const [timeline, setTimeline] = useState<TimelineStage[]>([]);
@@ -61,6 +62,25 @@ export function BackupCenter() {
   useEffect(() => {
     loadRecoveryData();
   }, [runtimeId]);
+
+  useEffect(() => {
+    if (!runtimeId) return;
+    const stream = runtimeAPI.connectMutationStream(
+      {
+        onData: (rows) => {
+          setMutationStream((prev) => {
+            const map = new Map(prev.map((item: any) => [`${item.id}:${item.timestamp}:${item.source}`, item]));
+            rows.forEach((item: any) => {
+              map.set(`${item.id}:${item.timestamp}:${item.source}`, item);
+            });
+            return Array.from(map.values()).slice(-200);
+          });
+        },
+      },
+      { runtimeId: String(runtimeId), projectId: context?.id ? String(context.id) : undefined },
+    );
+    return () => stream.close();
+  }, [runtimeId, context?.id]);
 
   const runRollback = async () => {
     if (!runtimeId || !selectedSnapshot || isRunning) return;
@@ -119,10 +139,20 @@ export function BackupCenter() {
       ts: e.created_at || e.timestamp || null,
       duration: null,
     }));
-    return [...stageRows, ...recRows, ...govRows, ...runtimeRows]
+    const streamRows = mutationStream.map((m: any, i: number) => ({
+      id: `ws-${m.id || i}`,
+      source: m.source || 'runtime',
+      label: m.label || m.type || 'mutation',
+      status: m.status || 'unknown',
+      message: m.message || '',
+      ts: m.timestamp || null,
+      duration: null,
+    }));
+
+    return [...stageRows, ...recRows, ...govRows, ...runtimeRows, ...streamRows]
       .sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime())
       .slice(0, 120);
-  }, [timeline, recoveries, governance, runtimeEvents]);
+  }, [timeline, recoveries, governance, runtimeEvents, mutationStream]);
 
   return (
     <div className="space-y-3 pb-6" dir="rtl">
