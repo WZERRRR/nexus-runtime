@@ -263,15 +263,22 @@ export function ProjectWorkspace() {
     }
   };
 
-  const handleReplayMutation = async (approvalId: string) => {
+  const handleReplayMutation = async (approvalId: string, nonce?: string) => {
     if (!project) return;
     const runtimeId = String(project?.runtime_id || project?.id || '');
+    if (!nonce) {
+      setOperationNotice({ type: 'error', message: 'تعذر إعادة التنفيذ: nonce غير متوفر' });
+      return;
+    }
     try {
-      const result = await runtimeAPI.replayApprovedMutation(runtimeId, approvalId, 'Runtime replay requested from workspace', 'Admin');
+      const result = await runtimeAPI.replayApprovedMutation(runtimeId, approvalId, 'Runtime replay requested from workspace', nonce, 'Admin');
       if (!result?.success) {
         const code = String(result?.error_code || '');
         if (code === 'REPLAY_LIMIT_REACHED') setOperationNotice({ type: 'error', message: 'تم الوصول للحد الأقصى لإعادة التنفيذ لهذه العملية' });
         else if (code === 'REPLAY_POLICY_GATE') setOperationNotice({ type: 'error', message: 'إعادة التنفيذ محظورة بسبب صلاحيات الحوكمة' });
+        else if (code === 'REPLAY_WINDOW_EXPIRED') setOperationNotice({ type: 'error', message: 'انتهت نافذة إعادة التنفيذ لهذه العملية' });
+        else if (code === 'NONCE_MISMATCH') setOperationNotice({ type: 'error', message: 'فشل تحقق nonce: إعادة التنفيذ مرفوضة' });
+        else if (code === 'NONCE_REQUIRED') setOperationNotice({ type: 'error', message: 'لا يمكن إعادة التنفيذ بدون nonce صالح' });
         else if (code === 'PAYLOAD_INTEGRITY_GATE') setOperationNotice({ type: 'error', message: 'فشل تحقق سلامة الحمولة التشغيلية' });
         else if (code === 'APPROVAL_GATE') setOperationNotice({ type: 'error', message: 'لا يمكن إعادة التنفيذ قبل اعتماد العملية' });
         else setOperationNotice({ type: 'error', message: result?.message || 'فشل إعادة تنفيذ العملية' });
@@ -516,7 +523,7 @@ export function ProjectWorkspace() {
                     </div>
                     <p className="text-[10px] text-slate-500">Mutation: {row.mutation_id || 'N/A'}</p>
                     <div className="mt-1.5 flex items-center gap-1">
-                      <button onClick={() => handleReplayMutation(row.approval_id)} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">Replay</button>
+                      <button onClick={() => handleReplayMutation(row.approval_id, row.payload_nonce)} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">Replay</button>
                     </div>
                   </div>
                 ))}

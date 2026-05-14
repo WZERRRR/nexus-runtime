@@ -6,7 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import os from "os";
 import { exec } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -350,6 +350,9 @@ try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN payload_ha
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN execution_status TEXT DEFAULT 'PENDING'`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN last_result_json TEXT`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN executed_at DATETIME`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN payload_nonce TEXT`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN replay_window_minutes INTEGER DEFAULT 30`); } catch {}
+try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN replay_expires_at DATETIME`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN replay_count INTEGER DEFAULT 0`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN stage_index INTEGER DEFAULT 1`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN total_stages INTEGER DEFAULT 1`); } catch {}
@@ -415,18 +418,30 @@ function failGovernedMutation(mutationId: string) {
   mutationCache.delete(mutationId);
 }
 
+function generatePayloadNonce() {
+  return randomBytes(12).toString('hex');
+}
+
 function persistPendingMutation(entry: PendingApprovalExecution) {
   const payload = JSON.stringify(entry);
   const payloadHash = createHash('sha256').update(payload).digest('hex');
+  const replayWindowMinutes = 30;
+  const replayExpiresAt = new Date(Date.now() + replayWindowMinutes * 60_000).toISOString();
+  const payloadNonce = generatePayloadNonce();
   sqliteDb.prepare(`
-    INSERT INTO runtime_pending_mutations (approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, execution_status, requested_by)
-    VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
+    INSERT INTO runtime_pending_mutations (
+      approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, payload_nonce, replay_window_minutes, replay_expires_at, execution_status, requested_by
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
     ON CONFLICT(approval_id) DO UPDATE SET
       runtime_id = excluded.runtime_id,
       mutation_id = excluded.mutation_id,
       mutation_kind = excluded.mutation_kind,
       payload_json = excluded.payload_json,
       payload_hash = excluded.payload_hash,
+      payload_nonce = excluded.payload_nonce,
+      replay_window_minutes = excluded.replay_window_minutes,
+      replay_expires_at = excluded.replay_expires_at,
       execution_status = 'PENDING',
       last_result_json = NULL,
       executed_at = NULL,
@@ -438,6 +453,9 @@ function persistPendingMutation(entry: PendingApprovalExecution) {
     entry.kind,
     payload,
     payloadHash,
+    payloadNonce,
+    replayWindowMinutes,
+    replayExpiresAt,
     entry.requestedBy
   );
 }
@@ -455,6 +473,37 @@ function getPendingMutationByApprovalId(approvalId: string): PendingApprovalExec
   }
 }
 
+function validatePendingMutationPayload(approvalId: string) {
+  const row = sqliteDb.prepare(`
+    SELECT payload_json, payload_hash, payload_nonce, replay_expires_at
+    FROM runtime_pending_mutations
+    WHERE approval_id = ?
+  `).get(approvalId) as any;
+  if (!row?.payload_json) return { ok: false, code: 'MUTATION_PAYLOAD_NOT_FOUND', entry: null as any, row: null as any };
+  try {
+    const payloadJson = String(row.payload_json);
+    const hash = createHash('sha256').update(payloadJson).digest('hex');
+    if (row.payload_hash && String(row.payload_hash) !== hash) {
+      return { ok: false, code: 'PAYLOAD_INTEGRITY_GATE', entry: null as any, row };
+    }
+    return { ok: true, code: 'OK', entry: JSON.parse(payloadJson) as PendingApprovalExecution, row };
+  } catch {
+    return { ok: false, code: 'PAYLOAD_PARSE_FAILED', entry: null as any, row };
+  }
+}
+
+function rotatePendingMutationReplayWindow(approvalId: string) {
+  const replayWindowMinutes = 30;
+  const replayExpiresAt = new Date(Date.now() + replayWindowMinutes * 60_000).toISOString();
+  const payloadNonce = generatePayloadNonce();
+  sqliteDb.prepare(`
+    UPDATE runtime_pending_mutations
+    SET payload_nonce = ?, replay_window_minutes = ?, replay_expires_at = ?
+    WHERE approval_id = ?
+  `).run(payloadNonce, replayWindowMinutes, replayExpiresAt, approvalId);
+  return { payloadNonce, replayExpiresAt, replayWindowMinutes };
+}
+
 function updatePendingMutationExecution(approvalId: string, status: 'COMPLETED' | 'FAILED', result: any) {
   sqliteDb.prepare(`
     UPDATE runtime_pending_mutations
@@ -465,7 +514,7 @@ function updatePendingMutationExecution(approvalId: string, status: 'COMPLETED' 
 
 function getPendingMutationRecord(approvalId: string) {
   return sqliteDb.prepare(`
-    SELECT approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, execution_status, last_result_json, executed_at, requested_by, created_at
+    SELECT approval_id, runtime_id, mutation_id, mutation_kind, payload_json, payload_hash, payload_nonce, replay_window_minutes, replay_expires_at, execution_status, last_result_json, executed_at, requested_by, created_at
     FROM runtime_pending_mutations
     WHERE approval_id = ?
   `).get(approvalId) as any;
@@ -473,7 +522,7 @@ function getPendingMutationRecord(approvalId: string) {
 
 function getPendingMutationsByRuntime(runtimeId: string) {
   return sqliteDb.prepare(`
-    SELECT approval_id, runtime_id, mutation_id, mutation_kind, execution_status, executed_at, requested_by, created_at
+    SELECT approval_id, runtime_id, mutation_id, mutation_kind, payload_nonce, replay_expires_at, execution_status, executed_at, requested_by, created_at
     FROM runtime_pending_mutations
     WHERE runtime_id = ?
     ORDER BY created_at DESC
@@ -1904,9 +1953,13 @@ async function startServer() {
       const approvalId = String(req.params.approvalId);
       const replayReason = String(req.body?.reason || '').trim();
       const replayedBy = String(req.body?.replayed_by || req.body?.reviewed_by || 'RuntimeOperator');
+      const providedNonce = String(req.body?.nonce || '').trim();
       const maxReplayAttempts = 3;
       if (!replayReason) {
         return governanceError(res, 400, 'Replay reason is required', 'REPLAY_REASON_REQUIRED');
+      }
+      if (!providedNonce) {
+        return governanceError(res, 400, 'Replay nonce is required', 'NONCE_REQUIRED');
       }
       if (!canReplayByRole(replayedBy)) {
         return governanceError(res, 403, 'Replay blocked: insufficient governance role', 'REPLAY_POLICY_GATE', {
@@ -1927,14 +1980,27 @@ async function startServer() {
 
       const pendingRecord = getPendingMutationRecord(approvalId);
       if (!pendingRecord) return governanceError(res, 404, 'No mutation payload found for this approval', 'MUTATION_PAYLOAD_NOT_FOUND');
-      const pending = getPendingMutationByApprovalId(approvalId);
-      if (!pending) return governanceError(res, 422, 'Payload integrity validation failed', 'PAYLOAD_INTEGRITY_GATE', { violation_type: 'PayloadIntegrityGate' });
+      if (String(pendingRecord.payload_nonce || '') !== providedNonce) {
+        return governanceError(res, 409, 'Replay blocked: nonce mismatch', 'NONCE_MISMATCH', { violation_type: 'PayloadIntegrityGate' });
+      }
+      if (pendingRecord.replay_expires_at && Date.now() > new Date(String(pendingRecord.replay_expires_at)).getTime()) {
+        return governanceError(res, 410, 'Replay blocked: replay window expired', 'REPLAY_WINDOW_EXPIRED', { violation_type: 'ReplayPolicyGate' });
+      }
+      const validated = validatePendingMutationPayload(approvalId);
+      if (!validated.ok || !validated.entry) {
+        const code = validated.code === 'PAYLOAD_INTEGRITY_GATE' ? 'PAYLOAD_INTEGRITY_GATE' : 'MUTATION_PAYLOAD_NOT_FOUND';
+        return governanceError(res, 422, 'Payload integrity validation failed', code, { violation_type: 'PayloadIntegrityGate' });
+      }
+      const pending = validated.entry;
+      const prePayloadHash = createHash('sha256').update(JSON.stringify(pending)).digest('hex');
 
       const replayMutationId = `replay-${pending.mutationId}-${Date.now()}`;
       const replayPayload: PendingApprovalExecution = { ...pending, mutationId: replayMutationId };
       const replayResult = await executeApprovedMutation(replayPayload);
+      const postPayloadHash = createHash('sha256').update(JSON.stringify(replayPayload)).digest('hex');
       updatePendingMutationExecution(approvalId, replayResult.success ? 'COMPLETED' : 'FAILED', replayResult);
       sqliteDb.prepare('UPDATE runtime_approvals SET replay_count = COALESCE(replay_count, 0) + 1 WHERE id = ?').run(approvalId);
+      const rotatedReplay = rotatePendingMutationReplayWindow(approvalId);
       addRuntimeLog(
         replayResult.success ? 'success' : 'error',
         replayResult.success
@@ -1950,6 +2016,13 @@ async function startServer() {
           replayMutationId,
           replayReason,
           replayedBy,
+          integrity: {
+            prePayloadHash,
+            postPayloadHash,
+            nonceUsed: providedNonce,
+            nextNonce: rotatedReplay.payloadNonce,
+            replayExpiresAt: rotatedReplay.replayExpiresAt
+          },
           result: replayResult
         }
       });
