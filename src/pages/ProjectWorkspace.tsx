@@ -455,6 +455,80 @@ export function ProjectWorkspace() {
                     <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics ? 'Connected' : 'No live data'}</p>
                   </div>
                 </div>
+                <div className="mt-3">
+                  {activeTab === 'pm2' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {pm2Processes.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : pm2Processes.map((proc: any) => (
+                        <div key={`${proc.id}-${proc.name}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{proc.name}</p>
+                          <p className="text-[11px] text-slate-500">Status: {proc.status || 'unknown'} | CPU: {proc.cpu || 'N/A'} | RAM: {proc.ram || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'logs' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {runtimeLogs.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : runtimeLogs.slice(0, 30).map((log: any, idx: number) => (
+                        <div key={`${log.id || idx}-${log.timestamp || ''}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-[11px] text-slate-500">{log.timestamp || 'N/A'} | {log.type || 'info'}</p>
+                          <p className="text-xs text-slate-700 dark:text-slate-200 break-words">{log.message || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'deploy' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {deployments.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : deployments.slice(0, 30).map((row: any, idx: number) => (
+                        <div key={`${row.id || row.deployment_id || idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{row.deploy_strategy || 'Deploy'}</p>
+                          <p className="text-[11px] text-slate-500">Status: {row.deploy_status || row.status || 'unknown'} | Risk: {row.risk_level || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'recovery' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {recoveries.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : recoveries.slice(0, 30).map((row: any, idx: number) => (
+                        <div key={`${row.recovery_id || row.id || idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{row.recovery_type || 'Recovery'}</p>
+                          <p className="text-[11px] text-slate-500">Status: {row.recovery_status || row.status || 'unknown'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'environments' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {environmentBindings.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : environmentBindings.map((env, idx) => (
+                        <div key={`${env?.name || 'env'}-${idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{env?.name || env?.environment || 'ENV'}</p>
+                          <p className="text-[11px] text-slate-500">Domain: {env?.realDomain || 'N/A'} | Port: {env?.runtimePort || 'N/A'} | SSL: {env?.sslState || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'governance' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {governanceEvents.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : governanceEvents.slice(0, 30).map((row: any, idx: number) => (
+                        <div key={`${row.id || idx}-${row.created_at || ''}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{row.action_type || row.event_type || 'Governance Action'}</p>
+                          <p className="text-[11px] text-slate-500">Status: {row.status || 'N/A'} | Target: {row.target || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
