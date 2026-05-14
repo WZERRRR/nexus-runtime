@@ -282,11 +282,17 @@ export function DomainsCenter() {
           >
             Add site
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all">
+          <button
+            onClick={() => showNotif("Advanced Setup سيتم ربطه ضمن Governance Policies قريبًا", "alert")}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
+          >
             Advanced Setup
             <ChevronDown className="w-4 h-4 opacity-50" />
           </button>
-          <button className="px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all">
+          <button
+            onClick={() => showNotif("Statistics قيد التفعيل التشغيلي", "alert")}
+            className="px-4 py-2 bg-slate-200 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg border border-slate-200 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 transition-all"
+          >
             Statistics
           </button>
           <div className="mx-2 w-px h-4 bg-slate-200 dark:bg-white/10" />
@@ -295,7 +301,10 @@ export function DomainsCenter() {
              <span className="text-xs font-bold text-emerald-500 tracking-tight">Nginx 1.24.0</span>
              <ChevronDown className="w-3 h-3 text-emerald-500 opacity-50 rotate-90" />
           </div>
-          <button className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-300 transition-colors ml-2">
+          <button
+            onClick={() => showNotif("Feedback channel is available via Governance logs", "success")}
+            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 dark:text-slate-300 transition-colors ml-2"
+          >
              <MessageSquare className="w-4 h-4" />
              Feedback
           </button>
@@ -319,7 +328,10 @@ export function DomainsCenter() {
                <Search className="w-4 h-4 text-slate-500" />
             </div>
           </div>
-          <button className="p-2 hover:bg-slate-200 dark:bg-white/5 rounded-lg text-slate-500 transition-colors">
+          <button
+            onClick={() => showNotif("Domain panel settings synced", "success")}
+            className="p-2 hover:bg-slate-200 dark:bg-white/5 rounded-lg text-slate-500 transition-colors"
+          >
              <Settings2 className="w-4 h-4" />
           </button>
         </div>
