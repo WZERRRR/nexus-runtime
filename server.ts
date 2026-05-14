@@ -504,6 +504,96 @@ function rotatePendingMutationReplayWindow(approvalId: string) {
   return { payloadNonce, replayExpiresAt, replayWindowMinutes };
 }
 
+function findNginxBindingForDomain(domain: string, expectedPort?: number | null) {
+  const candidates = [
+    path.join(GLOBAL_ROOT, 'nginx/conf.d'),
+    '/etc/nginx/conf.d',
+    '/etc/nginx/sites-enabled'
+  ];
+  for (const dir of candidates) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.conf'));
+      for (const file of files) {
+        const fullPath = path.join(dir, file);
+        const content = fs.readFileSync(fullPath, 'utf8');
+        const hasDomain = content.includes(`server_name ${domain}`) || content.includes(domain);
+        if (!hasDomain) continue;
+        if (expectedPort) {
+          const hasPort = content.includes(`:${expectedPort}`) || content.includes(`proxy_pass http://127.0.0.1:${expectedPort}`) || content.includes(`proxy_pass http://localhost:${expectedPort}`);
+          if (!hasPort) continue;
+        }
+        return { bound: true, file: fullPath };
+      }
+    } catch {}
+  }
+  return { bound: false, file: null as string | null };
+}
+
+async function runRuntimeVerificationGates(project: any, runCommand: (command: string, cwd: string, timeout?: number) => Promise<{ stdout: string; stderr: string; error: string | null }>) {
+  const runtimePath = String(project?.runtime_path || '');
+  const runtimeProcess = String(project?.runtime_process || '').trim();
+  const runtimeDomain = String(project?.domain || '').trim();
+  const runtimePort = Number(project?.runtime_port || 0) || null;
+
+  const pm2Result = await runCommand('npx -y pm2 jlist', runtimePath, 120000);
+  if (pm2Result.error) return { ok: false, code: 'PM2_GATE_FAILED', reason: pm2Result.error, details: { pm2Error: pm2Result.error } };
+  let pm2List: any[] = [];
+  try { pm2List = pm2Result.stdout?.trim() ? JSON.parse(pm2Result.stdout) : []; } catch {}
+  const targetProc = runtimeProcess ? pm2List.find((p: any) => String(p?.name || '') === runtimeProcess) : null;
+  const pm2Online = runtimeProcess ? Boolean(targetProc && String(targetProc?.pm2_env?.status || '').toLowerCase() === 'online') : pm2List.some((p: any) => String(p?.pm2_env?.status || '').toLowerCase() === 'online');
+  if (!pm2Online) return { ok: false, code: 'PM2_HEALTH_GATE_FAILED', reason: `PM2 runtime process is not online (${runtimeProcess || 'any'})`, details: { runtimeProcess } };
+
+  if (runtimeDomain) {
+    const binding = findNginxBindingForDomain(runtimeDomain, runtimePort);
+    if (!binding.bound) {
+      return { ok: false, code: 'DOMAIN_ROUTE_GATE_FAILED', reason: `Domain ${runtimeDomain} is not bound to runtime route`, details: { runtimeDomain, runtimePort } };
+    }
+  }
+
+  if (runtimePort) {
+    const net = await runCommand(`netstat -ano | findstr :${runtimePort}`, runtimePath, 120000);
+    const listening = Boolean((net.stdout || '').toLowerCase().includes('listening') || (net.stdout || '').trim().length > 0);
+    if (!listening) {
+      return { ok: false, code: 'PORT_BINDING_GATE_FAILED', reason: `Runtime port ${runtimePort} is not listening`, details: { runtimePort } };
+    }
+  }
+
+  const readiness = fs.existsSync(path.join(runtimePath, 'package.json')) || fs.existsSync(path.join(runtimePath, 'artisan')) || fs.existsSync(path.join(runtimePath, 'pubspec.yaml'));
+  if (!readiness) {
+    return { ok: false, code: 'RUNTIME_READINESS_GATE_FAILED', reason: 'Runtime readiness markers missing (package.json/artisan/pubspec.yaml)', details: { runtimePath } };
+  }
+
+  return {
+    ok: true,
+    code: 'OK',
+    reason: 'All runtime verification gates passed',
+    details: {
+      pm2Online,
+      runtimeProcess: runtimeProcess || null,
+      runtimeDomain: runtimeDomain || null,
+      runtimePort: runtimePort || null,
+      readiness
+    }
+  };
+}
+
+function triggerGovernedAutoRecovery(runtimeId: string, snapshotId: string, reason: string) {
+  const recoveryId = `auto-rec-${Date.now()}`;
+  try {
+    sqliteDb.prepare(`
+      INSERT INTO runtime_recovery
+      (recovery_id, runtime_id, snapshot_id, recovery_type, recovery_status, risk_level, requested_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(recoveryId, runtimeId, snapshotId, 'AUTO_RECOVERY', 'PENDING', 'high', 'GovernanceEngine');
+    addGovernanceAction('AUTO_RUNTIME_RECOVERY', 'GovernanceEngine', runtimeId, 'TRIGGERED');
+    addRuntimeLog('error', `[auto-recovery:${recoveryId}] Triggered for runtime ${runtimeId}. Reason: ${reason}`, 'recovery_runtime');
+  } catch (e: any) {
+    addRuntimeLog('error', `Auto recovery trigger failed for runtime ${runtimeId}: ${e.message}`, 'recovery_runtime');
+  }
+  return recoveryId;
+}
+
 function updatePendingMutationExecution(approvalId: string, status: 'COMPLETED' | 'FAILED', result: any) {
   sqliteDb.prepare(`
     UPDATE runtime_pending_mutations
@@ -4274,6 +4364,19 @@ async function startServer() {
         return { status: 'ok', output: `${online} PM2 process(es) online` };
       });
 
+      await runStage('Runtime Verification Gates', async () => {
+        const verification = await runRuntimeVerificationGates(project, runCommand);
+        if (!verification.ok) {
+          const autoRecoveryId = triggerGovernedAutoRecovery(runtimeId, snapshotId, verification.reason);
+          return {
+            status: 'failed',
+            error: `${verification.code}: ${verification.reason}`,
+            output: `Auto recovery triggered: ${autoRecoveryId}`
+          };
+        }
+        return { status: 'ok', output: JSON.stringify(verification.details || {}) };
+      });
+
       await runStage('Deploy Verification', async () => {
         const distExists = fs.existsSync(path.join(cwd, 'dist')) || fs.existsSync(path.join(cwd, 'build'));
         return { status: distExists ? 'ok' : 'skipped', output: distExists ? 'Artifact directory detected' : 'No artifact directory detected' };
@@ -4290,6 +4393,7 @@ async function startServer() {
       addGovernanceAction('RUNTIME_DEPLOY', 'Runtime', runtimeId, 'COMPLETED');
       const postcheck = {
         pm2Healthy: timeline.some((stage) => stage.stage === 'Health Check' && stage.status === 'ok'),
+        runtimeGatesPassed: timeline.some((stage) => stage.stage === 'Runtime Verification Gates' && stage.status === 'ok'),
         deployVerified: timeline.some((stage) => stage.stage === 'Deploy Verification' && stage.status !== 'failed'),
         rollbackValidated: timeline.some((stage) => stage.stage === 'Rollback Validation' && stage.status !== 'failed'),
       };
@@ -4440,13 +4544,11 @@ async function startServer() {
         return { status: 'ok', output: r.stdout };
       });
       await runStage('Runtime Verification', async () => {
-        const r = await runCommand('npx -y pm2 jlist', project.runtime_path, 120000);
-        if (r.error) return { status: 'failed', error: r.error };
-        const parsed = r.stdout?.trim() ? JSON.parse(r.stdout) : [];
-        const target = String(project.runtime_process || '');
-        const proc = Array.isArray(parsed) ? parsed.find((p: any) => !target || p?.name === target) : null;
-        if (target && !proc) return { status: 'failed', error: `Runtime process ${target} not found after recovery` };
-        return { status: 'ok', output: `Runtime verification completed for ${target || 'all processes'}` };
+        const verification = await runRuntimeVerificationGates(project, runCommand);
+        if (!verification.ok) {
+          return { status: 'failed', error: `${verification.code}: ${verification.reason}` };
+        }
+        return { status: 'ok', output: JSON.stringify(verification.details || {}) };
       });
       await runStage('Health Check', async () => {
         const r = await runCommand('npx -y pm2 jlist', project.runtime_path, 120000);
