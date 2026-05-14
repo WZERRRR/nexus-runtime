@@ -33,7 +33,7 @@ interface OpenFile extends RuntimeFile {
   isDirty: boolean;
 }
 
-const PROTECTED_FILES = ['.env', 'server.ts', 'runtimePersistence.ts', 'db.ts', 'connection.ts'];
+const PROTECTED_FILES = ['.env', '.pem', '.key', 'credentials.json', 'id_rsa', 'server.ts', 'runtimePersistence.ts', 'db.ts', 'connection.ts'];
 
 // --- Helper Components ---
 
@@ -127,6 +127,7 @@ export function FileManager() {
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [includeSubdirs, setIncludeSubdirs] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -172,7 +173,7 @@ export function FileManager() {
         ...i,
         type: i.type || (i.isDirectory ? 'folder' : 'file'), // Support both response styles
         mtime: i.mtime || i.modified,
-        isProtected: PROTECTED_FILES.includes(i.name)
+        isProtected: Boolean(i.isSensitive) || PROTECTED_FILES.includes(i.name)
       })));
       setOperationalState('ready');
     } catch (err: any) {
@@ -330,6 +331,7 @@ export function FileManager() {
   );
 
   const filteredItems = useMemo(() => {
+    if (includeSubdirs && searchQuery.trim()) return items;
     const query = searchQuery.trim().toLowerCase();
     if (!query) return items;
     return items.filter(item => {
@@ -358,6 +360,29 @@ export function FileManager() {
     }
   };
 
+  const handleRuntimeSearch = async () => {
+    const query = searchQuery.trim();
+    if (!query) {
+      loadItems(currentPath);
+      return;
+    }
+    try {
+      setIsSearching(true);
+      const results = await runtimeAPI.searchRuntimeFiles(query, currentPath, includeSubdirs, projectRoot, projectId);
+      setItems((results || []).map((i: any) => ({
+        ...i,
+        type: i.type || 'file',
+        isProtected: Boolean(i.isSensitive) || PROTECTED_FILES.includes(i.name),
+        markers: i.marker ? [i.marker] : i.markers
+      })));
+      setOperationalState('ready');
+    } catch (e: any) {
+      showNotif(e.message || 'Search failed', 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     if (!selectedItem) {
       showNotif('Select a file or folder first', 'error');
@@ -366,6 +391,10 @@ export function FileManager() {
 
     const confirmed = window.confirm(`Delete "${selectedItem.name}"? This cannot be undone.`);
     if (!confirmed) return;
+    if (selectedItem.isProtected) {
+      showNotif('Sensitive file mutation blocked by governance', 'error');
+      return;
+    }
 
     try {
       await runtimeAPI.deleteFiles([selectedItem.path], projectRoot, projectId);
@@ -498,9 +527,9 @@ export function FileManager() {
                  />
                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-tighter whitespace-nowrap">Include subdir</span>
               </label>
-              <button className="p-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg transition-all ml-2 shadow-lg shadow-blue-600/20">
-                 <Search className="w-3.5 h-3.5 text-white" />
-              </button>
+                  <button onClick={handleRuntimeSearch} className="p-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg transition-all ml-2 shadow-lg shadow-blue-600/20">
+                     <Search className="w-3.5 h-3.5 text-white" />
+                  </button>
            </div>
         </div>
       </div>
@@ -620,7 +649,9 @@ export function FileManager() {
             >
                <RefreshCw className="w-12 h-12 text-blue-500 animate-spin opacity-20" />
                <p className="text-[11px] font-black uppercase tracking-[0.4em] text-slate-700">
-                  {operationalState === 'resolving' 
+                  {isSearching
+                    ? 'Runtime Search In Progress...'
+                    : operationalState === 'resolving' 
                     ? (isGlobalMode ? 'Loading Infrastructure Filesystem...' : 'Resolving Runtime Context...') 
                     : (isGlobalMode ? 'Scanning Directories...' : 'Synchronizing Live Files...') }
                </p>
@@ -760,7 +791,7 @@ export function FileManager() {
                              {item.size ? `${(item.size / 1024).toFixed(1)} KB` : '--'}
                           </td>
                           <td className="px-8 py-4 text-right font-mono text-[10px] text-slate-600">
-                             {item.mtime || '2024-05-12 17:25'}
+                             {item.mtime ? new Date(item.mtime).toLocaleString() : '--'}
                           </td>
                        </tr>
                      ))}

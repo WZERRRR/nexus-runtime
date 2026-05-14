@@ -43,6 +43,7 @@ export function TextEditorModal({
   projectRoot, projectId, currentDirPath, directoryItems, onNavigate, onLoadItems, onOpenFileDescendant
 }: TextEditorModalProps) {
   const activeFile = openFiles.find(f => f.path === activeFilePath);
+  const isMaskedSensitiveFile = activeFile?.content?.trim?.() === '*** MASKED SENSITIVE FILE ***';
   
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   
@@ -68,6 +69,18 @@ export function TextEditorModal({
   const handleSave = async (filePath: string) => {
     const file = openFiles.find(f => f.path === filePath);
     if (!file) return;
+    if (file.content.trim() === '*** MASKED SENSITIVE FILE ***') {
+      console.error('Sensitive masked files cannot be written.');
+      return;
+    }
+    if (file.path.toLowerCase().endsWith('.json')) {
+      try {
+        JSON.parse(file.content);
+      } catch {
+        console.error('Invalid JSON syntax');
+        return;
+      }
+    }
     try {
       await runtimeAPI.writeFile(file.path, file.content, projectRoot, projectId);
       setOpenFiles(prev => prev.map(f => f.path === filePath ? { ...f, isDirty: false } : f));
@@ -231,6 +244,7 @@ export function TextEditorModal({
                   onClick={handleSelectionChange}
                   onKeyUp={handleSelectionChange}
                   spellCheck={false}
+                  readOnly={isMaskedSensitiveFile}
                   className="flex-1 bg-transparent p-1 pl-3 font-mono text-[14px] leading-[1.4rem] text-[#d4d4d4] resize-none outline-none whitespace-pre overflow-auto h-full"
                   style={{ tabSize: 4 }}
                 />

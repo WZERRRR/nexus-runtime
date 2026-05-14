@@ -2129,6 +2129,100 @@ async function startServer() {
     }
   });
 
+  app.get("/api/runtime/files/search", async (req, res) => {
+    const requestedPath = (req.query.path as string) || ".";
+    const projectId = req.query.projectId as string;
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const includeSubdirs = String(req.query.includeSubdirs || "false").toLowerCase() === "true";
+    let projectRoot = req.query.root as string;
+
+    if (!q) {
+      return res.json({ success: true, data: [] });
+    }
+
+    if (projectId) {
+      const project = await getProjectById(projectId);
+      if (project && project.runtime_path) {
+        projectRoot = project.runtime_path;
+      }
+    }
+
+    const absolutePath = getSafePath(requestedPath, projectRoot);
+    const maxResults = 300;
+    const maxDepth = includeSubdirs ? 10 : 1;
+    const matches: any[] = [];
+
+    const walk = (dir: string, relBase: string, depth: number) => {
+      if (depth > maxDepth || matches.length >= maxResults) return;
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (matches.length >= maxResults) break;
+        const full = path.join(dir, entry.name);
+        const rel = relBase === "." ? entry.name : path.join(relBase, entry.name);
+        const lower = entry.name.toLowerCase();
+
+        if (entry.isDirectory()) {
+          if (lower.includes(q)) {
+            matches.push({
+              name: entry.name,
+              type: "folder",
+              path: rel,
+              marker: "name",
+              isSensitive: false,
+            });
+          }
+          if (includeSubdirs) walk(full, rel, depth + 1);
+          continue;
+        }
+
+        const sensitive = isSensitiveRuntimeFile(full);
+        if (lower.includes(q)) {
+          matches.push({
+            name: entry.name,
+            type: "file",
+            path: rel,
+            marker: "name",
+            isSensitive: sensitive,
+          });
+          continue;
+        }
+
+        if (sensitive) continue;
+
+        try {
+          const content = fs.readFileSync(full, "utf8");
+          if (content.toLowerCase().includes(q)) {
+            matches.push({
+              name: entry.name,
+              type: "file",
+              path: rel,
+              marker: "content",
+              isSensitive: false,
+            });
+          }
+        } catch {
+          // ignore unreadable files
+        }
+      }
+    };
+
+    try {
+      if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isDirectory()) {
+        return res.status(404).json({ success: false, message: "Search path not found." });
+      }
+      walk(absolutePath, requestedPath || ".", 1);
+      return res.json({ success: true, data: matches });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   const blockSimulationEndpoints = (res: any) => {
     return res.status(403).json({
       success: false,

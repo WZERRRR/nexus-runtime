@@ -327,6 +327,26 @@ class RuntimeAPI {
     if (!data.success) throw new Error(data.message);
   }
 
+  async searchRuntimeFiles(
+    q: string,
+    path: string = '.',
+    includeSubdirs: boolean = false,
+    root?: string,
+    projectId?: string | number
+  ): Promise<any[]> {
+    const params = new URLSearchParams({
+      q,
+      path,
+      includeSubdirs: includeSubdirs ? 'true' : 'false',
+    });
+    if (root) params.set('root', root);
+    if (projectId) params.set('projectId', projectId.toString());
+    const res = await fetch(`/api/runtime/files/search?${params.toString()}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Search failed');
+    return data.data || [];
+  }
+
   async getPolicyViolations(): Promise<any[]> {
     const res = await fetch('/api/runtime/policies/violations');
     const data = await res.json();
