@@ -6,6 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import os from "os";
 import { exec } from "child_process";
+import { createHash } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -138,11 +139,14 @@ async function runDeploymentPipeline(pipelineId: string) {
 
     updatePipelineStatus(pipelineId, 'completed');
     
-    // Auto-register artifact on success
+    // Auto-register artifact on success (deterministic identity, no random state)
+    const artifactSeed = `${pipelineId}:${Date.now()}`;
+    const artifactId = `ART-${createHash('sha1').update(artifactSeed).digest('hex').slice(0, 10).toUpperCase()}`;
+    const artifactVersion = `v1.0.${Date.now()}`;
     registerArtifact({
-        id: `ART-${Math.random().toString(36).substring(7).toUpperCase()}`,
+        id: artifactId,
         pipeline_id: pipelineId,
-        version: `v1.0.${Math.floor(Math.random() * 100)}`,
+        version: artifactVersion,
         metadata: JSON.stringify({ timestamp: new Date().toISOString(), integrity: 'VERIFIED' })
     });
 }
@@ -155,7 +159,6 @@ function startInfrastructureIntelligence() {
     
     setInterval(() => {
         const sim = getSimulationState();
-        const scaleBy = sim?.is_stress_mode ? 2 : 1;
 
         // 1. Stability Calculation
         const recentViolations = sqliteDb.prepare(`SELECT COUNT(*) as count FROM policy_violations WHERE timestamp > datetime('now', '-10 minutes')`).get() as any;
@@ -180,7 +183,10 @@ function startInfrastructureIntelligence() {
         recordStability(Math.max(0, stabilityScore), factor);
 
         // 2. Intelligent Recommendations
-        if (stabilityScore < 85 && Math.random() > 0.7) {
+        const existingCritical = sqliteDb.prepare(
+          `SELECT COUNT(*) as count FROM runtime_recommendations WHERE impact_area = 'Stability' AND severity = 'Critical' AND timestamp > datetime('now', '-15 minutes')`
+        ).get() as any;
+        if (stabilityScore < 85 && Number(existingCritical?.count || 0) === 0) {
             addRecommendation(
                 'Execute Automatic Recovery', 
                 `Stability index dropped to ${stabilityScore}%. Potential Node drift detected in worker cluster. Restore point recommended.`,
@@ -230,36 +236,7 @@ function startOperationalIntelligenceEngine() {
 // Phase 13: Agent Network Simulator
 // ===================================
 function startAgentNetworkSimulator() {
-    console.log('[DevCore Agent] Initializing Agent Network Simulator...');
-    
-    setInterval(() => {
-        const sim = getSimulationState();
-        const agents = getAgents();
-        agents.forEach((agent: any) => {
-            // Random heartbeat metrics
-            let cpuBase = 1;
-            let memBase = 100;
-            
-            if (sim?.is_stress_mode) {
-              cpuBase = 40 + (sim.chaos_level || 0);
-              memBase = 500 + (sim.chaos_level * 5);
-              
-              if (Math.random() > 0.9) {
-                sqliteDb.prepare(`UPDATE runtime_agents SET status = 'DEGRADED' WHERE agent_id = ?`).run(agent.agent_id);
-              }
-            } else {
-               if (agent.status === 'DEGRADED') {
-                 sqliteDb.prepare(`UPDATE runtime_agents SET status = 'ONLINE' WHERE agent_id = ?`).run(agent.agent_id);
-               }
-            }
-
-            const cpu = +(Math.random() * 15 + cpuBase).toFixed(2);
-            const mem = +(Math.random() * 200 + memBase).toFixed(2);
-            const uptimeInc = 30; // 30s interval
-            
-            recordHeartbeat(agent.agent_id, cpu, mem, uptimeInc);
-        });
-    }, 30000); // Heartbeat every 30s
+    console.log('[DevCore Agent] Simulation heartbeat engine disabled in strict operational mode.');
 }
 
 // ===================================
@@ -450,7 +427,9 @@ async function startServer() {
     
     // 2. Initialize Audit/Persistence DB (for logs, events)
     initDB();
-    seedDummyData();
+    if (!STRICT_OPERATIONAL_MODE) {
+      seedDummyData();
+    }
     
     console.log('[DevCore Startup] Persistence layer ready.');
 
@@ -1307,7 +1286,7 @@ async function startServer() {
 
   app.post("/api/runtime/pipelines/trigger", (req, res) => {
     const { name, env, user } = req.body;
-    const pipelineId = `PIPE-${Math.random().toString(36).substring(7).toUpperCase()}`;
+    const pipelineId = `PIPE-${createHash('sha1').update(`${name || 'pipeline'}:${env || 'STAGING'}:${Date.now()}`).digest('hex').slice(0, 10).toUpperCase()}`;
     createPipeline({ id: pipelineId, name: name || "Manual Release", env: env || "STAGING", user: user || "U-ADMIN" });
     
     // Run async orchestration
@@ -1525,14 +1504,15 @@ async function startServer() {
   });
 
   app.get("/api/runtime/intelligence/optimization", (req, res) => {
-    res.json({
-      success: true,
-      data: [
-         { type: 'Resource', title: 'Runtime Scaling', impact: 'High', description: 'Worker cluster C-4 is reaching 85% utilization. Scaling by 2 nodes recommended.' },
-         { type: 'Performance', title: 'Cache Warm-up', impact: 'Medium', description: 'Intelligence agents detecting slow neural path retrieval. Warm-up protocol suggested.' },
-         { type: 'Cost', title: 'Idle Node Decommission', impact: 'Low', description: 'Regional node US-WEST-2 has 0 active sessions for 4h. Safe to spin down.' }
-      ]
-    });
+    const recommendations = getPendingRecommendations();
+    const normalized = (recommendations || []).map((item: any) => ({
+      type: String(item.impact_area || 'Operations'),
+      title: String(item.title || 'Runtime Recommendation'),
+      impact: String(item.severity || 'Medium'),
+      description: String(item.description || ''),
+      timestamp: item.timestamp || null,
+    }));
+    res.json({ success: true, data: normalized });
   });
 
   app.get("/api/runtime/intelligence/deployment-risk/:name", (req, res) => {
@@ -1553,13 +1533,17 @@ async function startServer() {
   });
 
   app.get("/api/runtime/intelligence/anomaly-stream", (req, res) => {
-    res.json({
-      success: true,
-      data: [
-        { id: 1, type: 'Behavioral', severity: 'Medium', details: 'Unusual access pattern from Node-X4', time: new Date().toISOString() },
-        { id: 2, type: 'Structural', severity: 'Low', details: 'Minor drift in coordination latency', time: new Date().toISOString() }
-      ]
-    });
+    const recent = getOperationalSignals(40) || [];
+    const mapped = recent
+      .filter((item: any) => ['Anomaly', 'Correlation'].includes(String(item.signal_type || '')))
+      .map((item: any) => ({
+        id: item.id,
+        type: item.signal_type,
+        severity: item.severity,
+        details: item.description,
+        time: item.timestamp,
+      }));
+    res.json({ success: true, data: mapped });
   });
 
   app.get("/api/runtime/intelligence/risk-indicators", async (req, res) => {
@@ -1587,14 +1571,12 @@ async function startServer() {
 
   app.post("/api/runtime/recovery/restore", (req, res) => {
     const { restoreId } = req.body;
+    if (!restoreId) {
+      return res.status(400).json({ success: false, message: "restoreId is required" });
+    }
     logRecoveryAction(restoreId, 'Initiated', 'User triggered manual recovery protocol.', 'U-ADMIN');
-    
-    // Simulate recovery process
-    setTimeout(() => {
-      logRecoveryAction(restoreId, 'Success', 'Runtime integrity restored to previous baseline.', 'System-Core');
-    }, 5000);
 
-    res.json({ success: true, message: "Recovery protocol initiated." });
+    res.json({ success: true, message: "Recovery protocol initiated and pending runtime verification." });
   });
 
   // Phase 16: Hardening & Coordination Endpoints

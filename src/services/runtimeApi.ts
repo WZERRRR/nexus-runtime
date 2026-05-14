@@ -651,6 +651,12 @@ class RuntimeAPI {
   async getSimulationState(): Promise<any> {
     const res = await fetch('/api/runtime/simulation/state');
     const data = await res.json();
+    if (!res.ok || !data.success) {
+      return {
+        enabled: false,
+        reason: 'لا توجد بيانات تشغيلية حالياً',
+      };
+    }
     return data.data;
   }
 

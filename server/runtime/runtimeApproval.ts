@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { createHash } from "crypto";
 
 export enum ApprovalStatus {
   PENDING = 'PENDING',
@@ -43,7 +44,8 @@ export class RuntimeApproval {
         risk_level: string;
         approval_reason: string;
     }): Promise<string> {
-        const id = `APPR-${Math.random().toString(36).substring(7).toUpperCase()}`;
+        const seed = `${record.runtime_id}:${record.operation_type}:${record.requested_by}:${Date.now()}`;
+        const id = `APPR-${createHash('sha1').update(seed).digest('hex').slice(0, 10).toUpperCase()}`;
         const stmt = db.prepare(`
             INSERT INTO runtime_approvals (id, runtime_id, operation_type, requested_by, approval_status, risk_level, approval_reason)
             VALUES (?, ?, ?, ?, ?, ?, ?)

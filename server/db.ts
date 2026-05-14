@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -463,7 +464,8 @@ export function getNodeCoordination() {
 // Phase 15: Runtime Recovery & Intelligence Helpers
 // ===============================================
 export function createRestorePoint(name: string, scope: string, snapshot: string, user: string) {
-  const id = `RS-${Math.random().toString(36).substring(7).toUpperCase()}`;
+  const seed = `${name}:${scope}:${user}:${Date.now()}`;
+  const id = `RS-${createHash('sha1').update(seed).digest('hex').slice(0, 10).toUpperCase()}`;
   db.prepare(`
     INSERT INTO runtime_restore_points (restore_id, name, scope, state_snapshot, created_by)
     VALUES (?, ?, ?, ?, ?)
