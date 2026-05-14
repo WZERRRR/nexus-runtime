@@ -990,6 +990,23 @@ class RuntimeAPI {
     return data.data || [];
   }
 
+  async getRuntimeReadinessReport(runtimeId: string | number): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/readiness-report`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch readiness report');
+    return data.data;
+  }
+
+  async runRuntimeReadinessDrill(runtimeId: string | number): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/readiness-drill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Readiness drill failed');
+    return data.data;
+  }
+
   async reviewRuntimeApproval(runtimeId: string | number, approvalId: string, status: 'APPROVED' | 'REJECTED', reviewedBy: string = 'RuntimeOperator', reason: string = ''): Promise<any> {
     const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}`, {
       method: 'PUT',

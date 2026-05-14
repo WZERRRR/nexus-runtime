@@ -57,6 +57,8 @@ export function ProjectWorkspace() {
   const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
   const [pendingMutations, setPendingMutations] = useState<any[]>([]);
   const [mutationTimeline, setMutationTimeline] = useState<any[]>([]);
+  const [readinessReport, setReadinessReport] = useState<any | null>(null);
+  const [readinessDrillRunning, setReadinessDrillRunning] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [operationNotice, setOperationNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -72,7 +74,7 @@ export function ProjectWorkspace() {
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows, mutationTimelineRows] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows, mutationTimelineRows, readiness] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
@@ -84,6 +86,7 @@ export function ProjectWorkspace() {
       runtimeAPI.getRuntimeApprovals(runtimeId).catch(() => []),
       runtimeAPI.getRuntimePendingMutations(runtimeId).catch(() => []),
       runtimeAPI.getRuntimeMutationTimeline(runtimeId, 160).catch(() => []),
+      runtimeAPI.getRuntimeReadinessReport(runtimeId).catch(() => null),
     ]);
 
     setEnvironmentBindings(Array.isArray(envs) ? envs : []);
@@ -97,6 +100,7 @@ export function ProjectWorkspace() {
     setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
     setPendingMutations(Array.isArray(pendingRows) ? pendingRows : []);
     setMutationTimeline(Array.isArray(mutationTimelineRows) ? mutationTimelineRows : []);
+    setReadinessReport(readiness || null);
     setLastSync(new Date().toISOString());
   };
 
@@ -291,6 +295,28 @@ export function ProjectWorkspace() {
     }
   };
 
+  const handleReadinessDrill = async () => {
+    if (!project || readinessDrillRunning) return;
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    setReadinessDrillRunning(true);
+    try {
+      const result = await runtimeAPI.runRuntimeReadinessDrill(runtimeId);
+      setReadinessReport((prev: any) => ({
+        ...(prev || {}),
+        readinessScore: result?.score ?? prev?.readinessScore ?? 0,
+        status: result?.status ?? prev?.status ?? 'UNKNOWN',
+        checks: result?.checks ?? prev?.checks ?? {},
+        generatedAt: result?.generatedAt || new Date().toISOString(),
+      }));
+      setOperationNotice({ type: 'success', message: `Readiness Drill: ${result?.status || 'COMPLETED'} (${result?.score ?? 'N/A'}%)` });
+      await loadOperationalData(project);
+    } catch (e: any) {
+      setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ Readiness Drill' });
+    } finally {
+      setReadinessDrillRunning(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-slate-400 text-sm">جاري تحميل Runtime Workspace...</div>;
   }
@@ -480,6 +506,17 @@ export function ProjectWorkspace() {
           <div className="xl:col-span-3 glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3 h-fit">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-2">Runtime Intelligence</p>
             <div className="space-y-2">
+              <div className="rounded-lg border border-slate-200 dark:border-white/10 p-2 bg-white dark:bg-slate-900/40">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-slate-500">Production Readiness</p>
+                  <button onClick={handleReadinessDrill} disabled={readinessDrillRunning} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold disabled:opacity-60">
+                    {readinessDrillRunning ? 'Running...' : 'Run Drill'}
+                  </button>
+                </div>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-200 mt-1">
+                  {readinessReport?.status || 'UNKNOWN'} | {readinessReport?.readinessScore ?? 'N/A'}%
+                </p>
+              </div>
               <MetricPanel label="Runtime Health" value={healthLabel} />
               <MetricPanel label="PM2 Stability" value={`${onlinePm2Count} / ${pm2Processes.length} online`} />
               <MetricPanel label="Infrastructure State" value={activeBinding?.nginxBinding ? 'Bound' : 'Unbound'} />

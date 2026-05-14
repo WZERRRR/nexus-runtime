@@ -4763,6 +4763,77 @@ async function startServer() {
     }
   });
 
+  app.post("/api/runtime/:id/readiness-drill", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const project = await getProjectById(runtimeId);
+      if (!project?.runtime_path || !fs.existsSync(project.runtime_path)) {
+        return res.status(422).json({ success: false, message: 'Runtime path unavailable for readiness drill', error_code: 'READINESS_PATH_UNAVAILABLE' });
+      }
+
+      const runCommand = (command: string, cwd: string, timeout = 120000) =>
+        new Promise<{ stdout: string; stderr: string; error: string | null }>((resolve) => {
+          exec(command, { cwd, timeout }, (error, stdout, stderr) => {
+            resolve({ stdout: stdout || '', stderr: stderr || '', error: error ? error.message : null });
+          });
+        });
+
+      const checks: Array<{ name: string; passed: boolean; details: string }> = [];
+      const verify = await runRuntimeVerificationGates(project, runCommand);
+      checks.push({
+        name: 'Runtime Verification Gates',
+        passed: verify.ok,
+        details: verify.ok ? 'All verification gates passed' : `${verify.code}: ${verify.reason}`
+      });
+
+      const deploy = sqliteDb.prepare(`
+        SELECT deploy_status, created_at
+        FROM runtime_deployments
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(runtimeId) as any;
+      checks.push({
+        name: 'Latest Deploy Status',
+        passed: String(deploy?.deploy_status || '').toUpperCase() === 'COMPLETED',
+        details: deploy ? `Latest deploy: ${deploy.deploy_status}` : 'No deploy record found'
+      });
+
+      const recovery = sqliteDb.prepare(`
+        SELECT recovery_status, created_at
+        FROM runtime_recovery
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(runtimeId) as any;
+      checks.push({
+        name: 'Recovery Availability',
+        passed: Boolean(recovery),
+        details: recovery ? `Latest recovery status: ${recovery.recovery_status}` : 'No recovery record found'
+      });
+
+      const passedCount = checks.filter((c) => c.passed).length;
+      const score = Math.round((passedCount / checks.length) * 100);
+      const status = score >= 90 ? 'PRODUCTION_READY' : score >= 70 ? 'HARDENING_REQUIRED' : 'NOT_READY';
+
+      addGovernanceAction('READINESS_DRILL', 'GovernanceEngine', runtimeId, status);
+      addRuntimeLog(score >= 90 ? 'success' : score >= 70 ? 'warning' : 'error', `Readiness drill for ${runtimeId}: ${status} (${score}%)`, 'governance_runtime');
+
+      res.json({
+        success: true,
+        data: {
+          runtimeId,
+          score,
+          status,
+          checks,
+          generatedAt: new Date().toISOString()
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message || 'Readiness drill failed' });
+    }
+  });
+
   // ==========================================
   // VITE MIDDLEWARE (Full-Stack Dev)
   // ==========================================
