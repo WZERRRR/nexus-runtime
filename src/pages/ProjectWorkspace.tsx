@@ -152,6 +152,7 @@ export function ProjectWorkspace() {
   const activeBinding = useMemo(() => environmentBindings.find((item) => item?.validated) || environmentBindings[0] || null, [environmentBindings]);
 
   const onlinePm2Count = useMemo(() => pm2Processes.filter((p) => String(p?.status || '').toLowerCase() === 'online').length, [pm2Processes]);
+  const activeTabLabel = useMemo(() => WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label || 'Workspace', [activeTab]);
 
   const healthLabel = useMemo(() => {
     if (!runtimeMetrics && pm2Processes.length === 0) return 'UNKNOWN';
@@ -439,6 +440,21 @@ export function ProjectWorkspace() {
                 <p className="text-xs text-slate-500 mt-1">
                   Project: {project.name} | Runtime ID: {project.runtime_id || project.id} | Path: {project.runtime_path || 'N/A'} | Environment: {project.env || 'N/A'}
                 </p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-blue-400 mt-3">Module: {activeTabLabel}</p>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                    <p className="text-[10px] text-slate-500">PM2</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{onlinePm2Count} / {pm2Processes.length} online</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                    <p className="text-[10px] text-slate-500">Bindings</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{healthyBindings} / {environmentBindings.length} validated</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                    <p className="text-[10px] text-slate-500">Telemetry</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics ? 'Connected' : 'No live data'}</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
