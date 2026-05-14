@@ -26,7 +26,7 @@ const CATEGORIES = [
 ];
 
 const Toggle = ({ label, description, defaultChecked = false }: any) => (
- <div className="flex items-center justify-between p-6 bg-slate-100 dark:bg-black/20 rounded-[2rem] border border-slate-200 dark:border-white/5 hover:border-slate-200 dark:border-white/10 transition-all group">
+ <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-black/20 rounded-xl border border-slate-200 dark:border-white/5 hover:border-slate-200 dark:border-white/10 transition-all group">
  <div className="text-right">
  <p className="text-[11px] font-black text-white uppercase tracking-tight">{label}</p>
  {description && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest leading-relaxed">{description}</p>}
@@ -51,7 +51,7 @@ const InputField = ({ label, type = "text", placeholder, defaultValue = "", desc
  <div className="relative">
  {typeArea ? (
  <textarea 
- className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-3xl p-5 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all min-h-[120px] placeholder:text-slate-700"
+ className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all min-h-[100px] placeholder:text-slate-700"
  placeholder={placeholder}
  defaultValue={defaultValue}
  />
@@ -59,7 +59,7 @@ const InputField = ({ label, type = "text", placeholder, defaultValue = "", desc
  <>
  <input 
  type={isPassword && !showValue ? "password" : "text"} 
- className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-3xl p-5 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-700 pr-5 pl-12"
+ className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-700 pr-4 pl-10"
  placeholder={placeholder}
  defaultValue={defaultValue}
  />
@@ -67,7 +67,7 @@ const InputField = ({ label, type = "text", placeholder, defaultValue = "", desc
  <button 
  type="button"
  onClick={() => setShowValue(!showValue)}
- className="absolute left-5 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-200 dark:bg-white/5 rounded-xl transition-all text-slate-500 hover:text-blue-400"
+ className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-slate-200 dark:bg-white/5 rounded-lg transition-all text-slate-500 hover:text-blue-400"
  >
  <KeyRound className={`w-4 h-4 ${showValue ? 'text-blue-500' : ''}`} />
  </button>
@@ -85,7 +85,7 @@ const SelectField = ({ label, options, defaultValue, description }: any) => (
  <label className="text-[10px] font-black text-white uppercase tracking-widest block">{label}</label>
  <div className="relative">
  <select 
- className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-3xl p-5 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all cursor-pointer appearance-none" 
+ className="w-full bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:border-blue-500/50 transition-all cursor-pointer appearance-none" 
  defaultValue={defaultValue}
  >
  {options.map((opt: any) => <option key={opt.value} value={opt.value} className="bg-[#0d121f]">{opt.label}</option>)}
@@ -102,11 +102,11 @@ const SettingBlock = ({ title, icon: Icon, children }: any) => (
  <motion.div 
  initial={{ opacity: 0, y: 20 }}
  animate={{ opacity: 1, y: 0 }}
- className="mb-8 p-8 bg-white/[0.02] border border-slate-200 dark:border-white/5 rounded-3xl relative overflow-hidden group"
+ className="mb-6 p-5 bg-white/[0.02] border border-slate-200 dark:border-white/5 rounded-xl relative overflow-hidden group"
  >
  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[60px] -mr-16 -mt-16 rounded-full group-hover:bg-blue-500/10 transition-all"></div>
  <div className="flex items-center justify-between mb-8 relative z-10">
- <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-2xl">
+ <div className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 rounded-lg">
  <Icon className="w-4 h-4 text-slate-600 dark:text-slate-400 group-hover:text-blue-400 transition-colors" />
  </div>
  <h3 className="text-[10px] font-black text-white uppercase tracking-[0.2em]">{title}</h3>
