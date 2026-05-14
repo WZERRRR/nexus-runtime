@@ -308,6 +308,28 @@ const MANIFEST_NAME = "nexus.runtime.json";
 
 type MutationCacheEntry = { status: 'RUNNING' | 'COMPLETED'; updatedAt: number; response?: any };
 const mutationCache = new Map<string, MutationCacheEntry>();
+type PendingApprovalExecution =
+  | {
+      kind: 'pm2';
+      approvalId: string;
+      runtimeId: string;
+      mutationId: string;
+      action: string;
+      id: string | number;
+      projectId?: string | number;
+      requestedBy: string;
+    }
+  | {
+      kind: 'terminal';
+      approvalId: string;
+      runtimeId: string;
+      mutationId: string;
+      command: string;
+      cwd?: string;
+      projectId?: string | number;
+      requestedBy: string;
+    };
+const pendingApprovalExecutions = new Map<string, PendingApprovalExecution>();
 
 function beginGovernedMutation(mutationId: string) {
   const existing = mutationCache.get(mutationId);
@@ -333,6 +355,82 @@ function completeGovernedMutation(mutationId: string, response: any) {
 
 function failGovernedMutation(mutationId: string) {
   mutationCache.delete(mutationId);
+}
+
+function execPromise(command: string, opts?: { cwd?: string; timeout?: number }) {
+  return new Promise<{ stdout: string; stderr: string; error: string | null }>((resolve) => {
+    exec(command, { cwd: opts?.cwd, timeout: opts?.timeout || 20000 }, (error, stdout, stderr) => {
+      resolve({
+        stdout: stdout || '',
+        stderr: stderr || '',
+        error: error ? error.message : null
+      });
+    });
+  });
+}
+
+async function executeApprovedMutation(entry: PendingApprovalExecution) {
+  if (entry.kind === 'pm2') {
+    const governanceCheck = await validateExecutionPolicy('PM2_MUTATION', 'RuntimeOperator', 'Admin');
+    if (!governanceCheck.allowed) {
+      return { success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' };
+    }
+    let finalCommand = `npx -y pm2 ${entry.action} ${entry.id}`;
+    if (entry.projectId) {
+      const project = await getProjectById(String(entry.projectId));
+      if (project) finalCommand = wrapCommandWithRuntimeContext(finalCommand, project);
+    }
+    const run = await execPromise(finalCommand, { timeout: 40000 });
+    if (run.error) {
+      failGovernedMutation(entry.mutationId);
+      return { success: false, message: run.error, data: { mutationId: entry.mutationId } };
+    }
+    const post = await execPromise('npx -y pm2 jlist', { timeout: 30000 });
+    let processFound = false;
+    let status = 'unknown';
+    if (!post.error) {
+      try {
+        const parsed = post.stdout?.trim() ? JSON.parse(post.stdout) : [];
+        const byId = Array.isArray(parsed) ? parsed.find((p: any) => String(p?.pm_id) === String(entry.id) || String(p?.name) === String(entry.id)) : null;
+        processFound = Boolean(byId);
+        status = byId?.pm2_env?.status || (entry.action === 'delete' && !byId ? 'deleted' : 'unknown');
+      } catch {}
+    }
+    addGovernanceAction('PM2_MUTATION', 'Runtime', `${entry.runtimeId}:${entry.action}:${entry.id}`, 'COMPLETED');
+    const data = { mutationId: entry.mutationId, postcheck: { processFound, status } };
+    completeGovernedMutation(entry.mutationId, data);
+    return { success: true, data };
+  }
+
+  const governanceCheck = await validateExecutionPolicy('TERMINAL_EXEC', 'RuntimeOperator', 'Admin');
+  if (!governanceCheck.allowed) {
+    return { success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' };
+  }
+  let finalCommand = entry.command;
+  let execCwd = entry.cwd;
+  if (entry.projectId) {
+    const project = await getProjectById(String(entry.projectId));
+    if (project && project.runtime_path) {
+      execCwd = project.runtime_path;
+      finalCommand = wrapCommandWithRuntimeContext(entry.command, project);
+    }
+  }
+  const executionContext = execCwd ? path.resolve(execCwd) : process.cwd();
+  const run = await execPromise(finalCommand, { cwd: executionContext, timeout: 20000 });
+  addGovernanceAction('TERMINAL_EXEC', 'Runtime', entry.runtimeId, run.error ? 'FAILED' : 'COMPLETED');
+  if (run.error) {
+    failGovernedMutation(entry.mutationId);
+    return { success: false, message: run.error, data: { mutationId: entry.mutationId } };
+  }
+  const data = {
+    mutationId: entry.mutationId,
+    postcheck: { exitCode: 0 },
+    stdout: run.stdout,
+    stderr: run.stderr,
+    error: null
+  };
+  completeGovernedMutation(entry.mutationId, data);
+  return { success: true, data };
 }
 
 function getProjectManifestPath(projectPath: string) {
@@ -1485,7 +1583,26 @@ async function startServer() {
     try {
       const { status, reviewed_by, reason } = req.body;
       await RuntimeApproval.updateApproval(req.params.approvalId, status, reviewed_by, reason);
-      res.json({ success: true });
+      const normalizedStatus = String(status || '').toUpperCase();
+      if (normalizedStatus === 'APPROVED') {
+        const pending = pendingApprovalExecutions.get(req.params.approvalId);
+        if (pending) {
+          const executionResult = await executeApprovedMutation(pending);
+          pendingApprovalExecutions.delete(req.params.approvalId);
+          addRuntimeLog(
+            executionResult.success ? 'success' : 'error',
+            executionResult.success
+              ? `Approval ${req.params.approvalId} executed mutation ${pending.mutationId}`
+              : `Approval ${req.params.approvalId} execution failed for mutation ${pending.mutationId}`,
+            'governance_runtime'
+          );
+          return res.json({ success: true, data: { orchestration: executionResult, mutationId: pending.mutationId } });
+        }
+      }
+      if (normalizedStatus === 'REJECTED') {
+        pendingApprovalExecutions.delete(req.params.approvalId);
+      }
+      res.json({ success: true, data: { orchestration: null } });
     } catch (e) {
       res.status(500).json({ success: false, message: 'Approval update failed' });
     }
@@ -1873,6 +1990,16 @@ async function startServer() {
         });
         addGovernanceAction('PM2_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
         addRuntimeLog('warning', `[mutation:${mutationId}] PM2 ${action} blocked pending approval ${requestedApprovalId}`, 'pm2_manager');
+        pendingApprovalExecutions.set(requestedApprovalId, {
+          kind: 'pm2',
+          approvalId: requestedApprovalId,
+          runtimeId,
+          mutationId,
+          action,
+          id,
+          projectId,
+          requestedBy
+        });
         const pendingResponse = {
           success: true,
           data: { status: 'PENDING_APPROVAL', runtimeId, mutationId, requestedApprovalId, riskLevel, precheck }
@@ -1890,6 +2017,7 @@ async function startServer() {
           failGovernedMutation(mutationId);
           return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
         }
+        pendingApprovalExecutions.delete(String(approvalId));
      }
 
      addRuntimeLog('warning', `[mutation:${mutationId}] PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
@@ -2005,6 +2133,16 @@ async function startServer() {
         approval_reason: `Terminal mutation requested for ${runtimeId}`,
       });
       addGovernanceAction('TERMINAL_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
+      pendingApprovalExecutions.set(requestedApprovalId, {
+        kind: 'terminal',
+        approvalId: requestedApprovalId,
+        runtimeId,
+        mutationId,
+        command: String(finalCommand),
+        cwd,
+        projectId,
+        requestedBy
+      });
       const pendingResponse = {
         success: true,
         data: { status: 'PENDING_APPROVAL', runtimeId, mutationId, requestedApprovalId, riskLevel, precheck }
@@ -2022,6 +2160,7 @@ async function startServer() {
         failGovernedMutation(mutationId);
         return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
       }
+      pendingApprovalExecutions.delete(String(approvalId));
     }
 
     const executionContext = cwd ? path.resolve(cwd) : process.cwd();
