@@ -79,7 +79,7 @@ export function FrontendCenter() {
  transition={{ delay: idx * 0.05 }}
  key={idx} 
  onClick={() => !loadingCmd && handleCommand(cmd)}
- className={`glass-panel p-5 rounded-2xl /50 hover:border-slate-600 transition-all group cursor-pointer active:scale-95 ${loadingCmd === cmd.name ? 'opacity-70 pointer-events-none' : ''}`}
+ className={`glass-panel p-5 rounded-2xl hover:border-slate-600 transition-all group cursor-pointer active:scale-95 ${loadingCmd === cmd.name ? 'opacity-70 pointer-events-none' : ''}`}
  >
  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 border ${cmd.bg} ${cmd.color} ${cmd.border} shadow-inner`}>
  {loadingCmd === cmd.name ? <Loader2 className="w-6 h-6 animate-spin text-white" /> : <cmd.icon className="w-6 h-6" />}
@@ -99,7 +99,7 @@ export function FrontendCenter() {
  <motion.div 
  initial={{ opacity: 0, x: -20 }}
  animate={{ opacity: 1, x: 0 }}
- className="glass-panel rounded-xl /50 lg:col-span-2 flex flex-col overflow-hidden"
+ className="glass-panel rounded-xl lg:col-span-2 flex flex-col overflow-hidden"
  >
  <div className="p-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
  <h3 className="font-bold text-white flex items-center gap-3">
@@ -150,7 +150,7 @@ export function FrontendCenter() {
  <motion.div 
  initial={{ opacity: 0, x: 20 }}
  animate={{ opacity: 1, x: 0 }}
- className="glass-panel rounded-xl /50 lg:col-span-1 flex flex-col overflow-hidden"
+ className="glass-panel rounded-xl lg:col-span-1 flex flex-col overflow-hidden"
  >
  <div className="p-4 border-b border-slate-200 dark:border-white/5 flex justify-between items-center bg-white dark:bg-slate-900/40">
  <h3 className="font-bold text-white flex items-center gap-3">

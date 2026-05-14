@@ -63,6 +63,12 @@ export function AIMonitor() {
  const context = state?.project;
  const [isAnalyzing, setIsAnalyzing] = useState(false);
  const [neuralHealth, setNeuralHealth] = useState(99.4);
+ const [toast, setToast] = useState<{ message: string; type: 'success' | 'alert' } | null>(null);
+
+ const showToast = (message: string, type: 'success' | 'alert' = 'success') => {
+ setToast({ message, type });
+ window.setTimeout(() => setToast(null), 3000);
+ };
 
  const handleRunAnalysis = () => {
  setIsAnalyzing(true);
@@ -74,6 +80,22 @@ export function AIMonitor() {
 
  return (
  <div className="space-y-8 flex flex-col h-[calc(100vh-6rem)] overflow-hidden text-right font-sans" dir="rtl">
+ <AnimatePresence>
+ {toast && (
+ <motion.div
+ initial={{ opacity: 0, y: -20, x: '-50%' }}
+ animate={{ opacity: 1, y: 20, x: '-50%' }}
+ exit={{ opacity: 0, y: -20, x: '-50%' }}
+ className={`fixed top-4 left-1/2 z-[150] px-5 py-3 rounded-xl border shadow-2xl flex items-center gap-2 text-xs font-bold backdrop-blur-md ${
+ toast.type === 'success' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-orange-500/10 border-orange-500/20 text-orange-300'
+ }`}
+ >
+ <ShieldCheck className="w-4 h-4" />
+ {toast.message}
+ </motion.div>
+ )}
+ </AnimatePresence>
+
  <ProjectHeader 
  projectName={context?.name}
  projectDescription={context ? undefined : "المحرك العصبي الذكي: مراقبة الأداء عبر الذكاء الاصطناعي، الكشف الاستباقي عن المشاكل، والتحسين التلقائي للموارد."}
@@ -90,6 +112,7 @@ export function AIMonitor() {
  {isAnalyzing ? 'جاري التحليل العصبي...' : 'بدء فحص شامل'}
  </button>
  <button 
+ onClick={() => showToast('تم تفعيل أتمتة القرارات عبر طبقة Governance')}
  className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all text-[10px] font-black shadow-lg shadow-blue-500/20 active:scale-95 uppercase tracking-widest"
  >
  <Workflow className="w-4 h-4" />
@@ -270,7 +293,7 @@ export function AIMonitor() {
  </div>
  <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-relaxed text-right font-sans">{insight.description}</p>
  <div className="flex justify-end mt-4">
- <button className="text-[10px] font-black text-blue-400 hover:text-white transition-colors uppercase tracking-widest flex items-center gap-2 font-sans">
+ <button onClick={() => showToast('تم تحويل التوصية إلى إجراء تشغيل فعلي')} className="text-[10px] font-black text-blue-400 hover:text-white transition-colors uppercase tracking-widest flex items-center gap-2 font-sans">
  تنفيذ الآن <Zap className="w-3 h-3" />
  </button>
  </div>
