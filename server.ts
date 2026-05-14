@@ -1786,20 +1786,27 @@ async function startServer() {
   });
 
   app.post("/api/runtime/pm2/action", async (req, res) => {
-     const { action, id, projectId } = req.body;
+     const { action, id, projectId, approvalId, requested_by, risk_level } = req.body;
      const allowedOpts = ['start', 'stop', 'restart', 'delete'];
      if (!allowedOpts.includes(action)) return res.json({ success: false, message: 'Invalid action' });
      const governanceCheck = await validateExecutionPolicy('PM2_MUTATION', 'RuntimeOperator', 'Admin');
      if (!governanceCheck.allowed) {
        return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
      }
+     const runtimeId = String(projectId || 'global-runtime');
+     const requestedBy = requested_by ? String(requested_by) : 'RuntimeOperator';
+     const riskLevel = risk_level ? String(risk_level).toLowerCase() : 'medium';
+     const mutationId = `mut-pm2-${runtimeId}-${Date.now()}`;
+     const requiresApproval = action === 'delete' || ['high', 'critical'].includes(riskLevel);
      
      let finalCommand = `npx -y pm2 ${action} ${id}`;
+     let runtimePathExists = true;
 
      if (projectId) {
          try {
              const project = await getProjectById(projectId);
              if (project) {
+                 runtimePathExists = Boolean(project.runtime_path && fs.existsSync(project.runtime_path));
                  finalCommand = wrapCommandWithRuntimeContext(`npx -y pm2 ${action} ${id}`, project);
              }
          } catch(e: any) {
@@ -1809,11 +1816,60 @@ async function startServer() {
          // Default protection if no project specified but in production
          return res.status(403).json({ success: false, message: "Governance Violation: Project ID required for Production Actions." });
      }
+     const precheck = {
+        runtimeId,
+        mutationId,
+        action,
+        targetId: String(id),
+        runtimePathExists
+     };
+     if (!precheck.runtimePathExists) {
+        return res.status(422).json({ success: false, message: 'Pre-check failed: runtime path unavailable', data: { mutationId, precheck } });
+     }
+     if (requiresApproval && !approvalId) {
+        const requestedApprovalId = await RuntimeApproval.requestApproval({
+          runtime_id: runtimeId,
+          operation_type: 'pm2_mutation' as any,
+          requested_by: requestedBy,
+          risk_level: riskLevel,
+          approval_reason: `PM2 ${action} requested for ${runtimeId}`,
+        });
+        addGovernanceAction('PM2_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
+        addRuntimeLog('warning', `[mutation:${mutationId}] PM2 ${action} blocked pending approval ${requestedApprovalId}`, 'pm2_manager');
+        return res.status(202).json({
+          success: true,
+          data: { status: 'PENDING_APPROVAL', runtimeId, mutationId, requestedApprovalId, riskLevel, precheck }
+        });
+     }
+     if (approvalId) {
+        const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+        if (!approval) return res.status(403).json({ success: false, message: 'Approval record not found for runtime', violation_type: 'ApprovalGate' });
+        if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
+          return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
+        }
+     }
 
-     addRuntimeLog('warning', `PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
+     addRuntimeLog('warning', `[mutation:${mutationId}] PM2 Action triggered: ${action} on ID ${id}`, 'pm2_manager');
      exec(finalCommand, (error, stdout) => {
-        if (error) return res.json({ success: false, message: error.message });
-        res.json({ success: true, message: `Action ${action} completed.` });
+        if (error) return res.json({ success: false, message: error.message, data: { mutationId, precheck } });
+        exec(`npx -y pm2 jlist`, (postErr, postStdout) => {
+          let processFound = false;
+          let postcheckStatus = 'unknown';
+          if (!postErr) {
+            try {
+              const parsed = postStdout?.trim() ? JSON.parse(postStdout) : [];
+              const byId = Array.isArray(parsed) ? parsed.find((p: any) => String(p?.pm_id) === String(id) || String(p?.name) === String(id)) : null;
+              processFound = Boolean(byId);
+              postcheckStatus = byId?.pm2_env?.status || (action === 'delete' && !byId ? 'deleted' : 'unknown');
+            } catch {}
+          }
+          addGovernanceAction('PM2_MUTATION', 'Runtime', `${runtimeId}:${action}:${id}`, 'COMPLETED');
+          res.json({
+            success: true,
+            message: `Action ${action} completed.`,
+            data: { mutationId, precheck, postcheck: { processFound, status: postcheckStatus } }
+          });
+        });
      });
   });
 
@@ -1829,9 +1885,13 @@ async function startServer() {
   });
 
   app.post("/api/runtime/terminal/exec", async (req, res) => {
-    const { command, cwd: qCwd, projectId } = req.body;
+    const { command, cwd: qCwd, projectId, approvalId, requested_by, risk_level } = req.body;
     let cwd = qCwd;
     let finalCommand = command;
+    const runtimeId = String(projectId || 'global-runtime');
+    const requestedBy = requested_by ? String(requested_by) : 'RuntimeOperator';
+    const riskLevel = risk_level ? String(risk_level).toLowerCase() : 'medium';
+    const mutationId = `mut-terminal-${runtimeId}-${Date.now()}`;
 
     if (projectId) {
        const project = await getProjectById(projectId);
@@ -1863,20 +1923,56 @@ async function startServer() {
       return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
     }
     
-    // Very basic protection
-    const forbidden = ['rm -rf /', 'mkfs', 'dd'];
-    if (forbidden.some(f => finalCommand.includes(f))) {
+    const normalized = String(finalCommand || '').toLowerCase();
+    const forbidden = ['rm -rf /', 'mkfs', 'dd', 'reboot', 'shutdown', 'kill -9'];
+    if (forbidden.some(f => normalized.includes(f))) {
       return res.status(403).json({ success: false, message: "Command forbidden by Governance Protocol." });
+    }
+    const requiresApproval = normalized.includes('pm2 delete') || normalized.includes('chmod') || ['high', 'critical'].includes(riskLevel);
+    const precheck = {
+      runtimeId,
+      mutationId,
+      cwd: cwd || process.cwd(),
+      command: String(finalCommand),
+      cwdExists: fs.existsSync(cwd ? path.resolve(cwd) : process.cwd())
+    };
+    if (!precheck.cwdExists) {
+      return res.status(422).json({ success: false, message: 'Pre-check failed: execution directory unavailable', data: { mutationId, precheck } });
+    }
+    if (requiresApproval && !approvalId) {
+      const requestedApprovalId = await RuntimeApproval.requestApproval({
+        runtime_id: runtimeId,
+        operation_type: 'production_mutation' as any,
+        requested_by: requestedBy,
+        risk_level: riskLevel,
+        approval_reason: `Terminal mutation requested for ${runtimeId}`,
+      });
+      addGovernanceAction('TERMINAL_MUTATION_APPROVAL', requestedBy, runtimeId, 'PENDING');
+      return res.status(202).json({
+        success: true,
+        data: { status: 'PENDING_APPROVAL', runtimeId, mutationId, requestedApprovalId, riskLevel, precheck }
+      });
+    }
+    if (approvalId) {
+      const approval = sqliteDb.prepare('SELECT * FROM runtime_approvals WHERE id = ? AND runtime_id = ?').get(approvalId, runtimeId) as any;
+      if (!approval) return res.status(403).json({ success: false, message: 'Approval record not found for runtime', violation_type: 'ApprovalGate' });
+      if (String(approval.approval_status || '').toUpperCase() !== 'APPROVED') {
+        return res.status(403).json({ success: false, message: `Approval ${approvalId} is not approved`, violation_type: 'ApprovalGate' });
+      }
     }
 
     const executionContext = cwd ? path.resolve(cwd) : process.cwd();
 
-    addRuntimeLog('info', `Terminal execution in ${executionContext}: ${finalCommand}`, 'terminal_gateway');
+    addRuntimeLog('info', `[mutation:${mutationId}] Terminal execution in ${executionContext}: ${finalCommand}`, 'terminal_gateway');
 
     exec(finalCommand, { cwd: executionContext, timeout: 20000 }, (error, stdout, stderr) => {
+       addGovernanceAction('TERMINAL_EXEC', 'Runtime', runtimeId, error ? 'FAILED' : 'COMPLETED');
        res.json({
          success: !error,
          data: {
+           mutationId,
+           precheck,
+           postcheck: { exitCode: error ? 1 : 0 },
            stdout: stdout || "",
            stderr: stderr || "",
            error: error ? error.message : null
@@ -2155,10 +2251,20 @@ async function startServer() {
   app.post("/api/files/write", async (req, res) => {
     const { path: filePath, content } = req.body;
     if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+    const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
+    if (!governanceCheck.allowed) {
+      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+    }
     const absolutePath = getSafePath(filePath);
     try {
+        const mutationId = `mut-fs-write-global-${Date.now()}`;
+        const precheck = { mutationId, absolutePath, exists: fs.existsSync(path.dirname(absolutePath)) };
+        if (!precheck.exists) {
+          return res.status(422).json({ success: false, message: 'Pre-check failed: parent directory unavailable', data: { mutationId, precheck } });
+        }
         fs.writeFileSync(absolutePath, content, 'utf8');
-        res.json({ success: true, message: "Global write successful" });
+        addGovernanceAction('FILESYSTEM_WRITE', 'Runtime', filePath, 'COMPLETED');
+        res.json({ success: true, message: "Global write successful", data: { mutationId, precheck, postcheck: { written: true } } });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -2167,7 +2273,13 @@ async function startServer() {
   app.post("/api/files/delete", async (req, res) => {
     const { paths } = req.body;
     if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths required" });
+    const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
+    if (!governanceCheck.allowed) {
+      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+    }
     try {
+        const mutationId = `mut-fs-delete-global-${Date.now()}`;
+        const precheck = { mutationId, requested: paths.length };
         paths.forEach(p => {
             const absolutePath = getSafePath(p);
             if (fs.existsSync(absolutePath)) {
@@ -2175,7 +2287,8 @@ async function startServer() {
                 else fs.unlinkSync(absolutePath);
             }
         });
-        res.json({ success: true });
+        addGovernanceAction('FILESYSTEM_DELETE', 'Runtime', String(paths.length), 'COMPLETED');
+        res.json({ success: true, data: { mutationId, precheck, postcheck: { completed: true } } });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -2397,10 +2510,19 @@ async function startServer() {
     }
 
     if (!filePath) return res.status(400).json({ success: false, message: "Path required" });
+    const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
+    if (!governanceCheck.allowed) {
+      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+    }
 
     const absolutePath = getSafePath(filePath, projectRoot);
 
     try {
+        const mutationId = `mut-fs-write-${projectId || 'runtime'}-${Date.now()}`;
+        const precheck = { mutationId, runtimeId: String(projectId || 'runtime'), parentExists: fs.existsSync(path.dirname(absolutePath)) };
+        if (!precheck.parentExists) {
+            return res.status(422).json({ success: false, message: 'Pre-check failed: parent directory unavailable', data: { mutationId, precheck } });
+        }
         if (isSensitiveRuntimeFile(absolutePath)) {
             auditSensitiveFileAccess('SENSITIVE_FILE_WRITE', filePath, 'BLOCKED');
             return res.status(403).json({ success: false, message: "Sensitive file write is blocked by governance." });
@@ -2408,7 +2530,7 @@ async function startServer() {
         fs.writeFileSync(absolutePath, content, 'utf8');
         addGovernanceAction('FILE_WRITE', 'Runtime', filePath, 'COMPLETED');
         addRuntimeLog('info', `File system write in ${projectRoot || 'Global'}: ${filePath}`, 'file_runtime');
-        res.json({ success: true, message: "File write completed." });
+        res.json({ success: true, message: "File write completed.", data: { mutationId, precheck, postcheck: { written: true } } });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -2426,8 +2548,13 @@ async function startServer() {
     }
 
     if (!paths || !Array.isArray(paths)) return res.status(400).json({ success: false, message: "Paths array required" });
+    const governanceCheck = await validateExecutionPolicy('FILESYSTEM_MUTATION', 'RuntimeOperator', 'Admin');
+    if (!governanceCheck.allowed) {
+      return res.status(403).json({ success: false, message: governanceCheck.reason, violation_type: 'GovernancePolicyGate' });
+    }
 
     try {
+        const mutationId = `mut-fs-delete-${projectId || 'runtime'}-${Date.now()}`;
         for (const p of paths) {
             const absolutePath = getSafePath(p, projectRoot);
             if (isSensitiveRuntimeFile(absolutePath)) {
@@ -2445,7 +2572,7 @@ async function startServer() {
                 addRuntimeLog('warn', `Infrastructure component wiped in ${projectRoot || 'Global'}: ${p}`, 'file_runtime');
             }
         }
-        res.json({ success: true });
+        res.json({ success: true, data: { mutationId, postcheck: { deleted: true, count: paths.length } } });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
