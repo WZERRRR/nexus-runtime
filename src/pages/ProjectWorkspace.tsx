@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Activity, Database, FileCode2, GitBranch, Globe, LayoutGrid, LifeBuoy, ListTree, MonitorCog, Rocket, ScrollText, ShieldCheck, TerminalSquare } from 'lucide-react';
 import { runtimeAPI } from '../services/runtimeApi';
 
@@ -18,27 +18,26 @@ type WorkspaceTabId =
   | 'governance'
   | 'recovery';
 
-const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.ReactNode; route: string }> = [
-  { id: 'overview', label: 'Overview', icon: <LayoutGrid className="w-4 h-4" />, route: '' },
-  { id: 'filesystem', label: 'Filesystem', icon: <FileCode2 className="w-4 h-4" />, route: '/files' },
-  { id: 'terminal', label: 'Terminal', icon: <TerminalSquare className="w-4 h-4" />, route: '/terminal' },
-  { id: 'pm2', label: 'PM2', icon: <ListTree className="w-4 h-4" />, route: '/pm2' },
-  { id: 'deploy', label: 'Deploy', icon: <Rocket className="w-4 h-4" />, route: '/deploy' },
-  { id: 'monitoring', label: 'Monitoring', icon: <Activity className="w-4 h-4" />, route: '/monitoring' },
-  { id: 'logs', label: 'Logs', icon: <ScrollText className="w-4 h-4" />, route: '/logs' },
-  { id: 'git', label: 'Git', icon: <GitBranch className="w-4 h-4" />, route: '/projects' },
-  { id: 'environments', label: 'Environments', icon: <Globe className="w-4 h-4" />, route: '/environments' },
-  { id: 'database', label: 'Database', icon: <Database className="w-4 h-4" />, route: '/database' },
-  { id: 'apis', label: 'APIs', icon: <MonitorCog className="w-4 h-4" />, route: '/apis' },
-  { id: 'governance', label: 'Governance', icon: <ShieldCheck className="w-4 h-4" />, route: '/governance' },
-  { id: 'recovery', label: 'Recovery', icon: <LifeBuoy className="w-4 h-4" />, route: '/backup' },
+const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.ReactNode }> = [
+  { id: 'overview', label: 'Overview', icon: <LayoutGrid className="w-4 h-4" /> },
+  { id: 'filesystem', label: 'Filesystem', icon: <FileCode2 className="w-4 h-4" /> },
+  { id: 'terminal', label: 'Terminal', icon: <TerminalSquare className="w-4 h-4" /> },
+  { id: 'pm2', label: 'PM2', icon: <ListTree className="w-4 h-4" /> },
+  { id: 'deploy', label: 'Deploy', icon: <Rocket className="w-4 h-4" /> },
+  { id: 'monitoring', label: 'Monitoring', icon: <Activity className="w-4 h-4" /> },
+  { id: 'logs', label: 'Logs', icon: <ScrollText className="w-4 h-4" /> },
+  { id: 'git', label: 'Git', icon: <GitBranch className="w-4 h-4" /> },
+  { id: 'environments', label: 'Environments', icon: <Globe className="w-4 h-4" /> },
+  { id: 'database', label: 'Database', icon: <Database className="w-4 h-4" /> },
+  { id: 'apis', label: 'APIs', icon: <MonitorCog className="w-4 h-4" /> },
+  { id: 'governance', label: 'Governance', icon: <ShieldCheck className="w-4 h-4" /> },
+  { id: 'recovery', label: 'Recovery', icon: <LifeBuoy className="w-4 h-4" /> },
 ];
 
 type TimelineFilter = 'all' | 'approval' | 'mutation' | 'deploy' | 'recovery';
 
 export function ProjectWorkspace() {
   const { id } = useParams();
-  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabId>('overview');
   const [isLoading, setIsLoading] = useState(true);
@@ -379,10 +378,7 @@ export function ProjectWorkspace() {
               {WORKSPACE_TABS.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    if (tab.id !== 'overview' && tab.route) navigate(tab.route, { state: { project } });
-                  }}
+                  onClick={() => setActiveTab(tab.id)}
                   className={`w-full px-3 py-2 rounded-lg border text-xs font-bold flex items-center gap-2 transition-colors ${
                     activeTab === tab.id
                       ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
