@@ -1007,6 +1007,27 @@ class RuntimeAPI {
     return data.data;
   }
 
+  async getRuntimeDrillHistory(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/drills/history`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch drill history');
+    return data.data || [];
+  }
+
+  async getRuntimeComplianceAuditExport(runtimeId: string | number): Promise<any> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/compliance-audit-export`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch compliance export');
+    return data.data;
+  }
+
+  async getRuntimeRunbooks(runtimeId: string | number): Promise<any[]> {
+    const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/runbooks`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Failed to fetch runbooks');
+    return data.data || [];
+  }
+
   async reviewRuntimeApproval(runtimeId: string | number, approvalId: string, status: 'APPROVED' | 'REJECTED', reviewedBy: string = 'RuntimeOperator', reason: string = ''): Promise<any> {
     const res = await fetch(`/api/runtime/${encodeURIComponent(runtimeId.toString())}/approvals/${encodeURIComponent(approvalId)}`, {
       method: 'PUT',

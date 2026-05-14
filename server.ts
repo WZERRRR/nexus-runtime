@@ -353,6 +353,19 @@ try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN executed_a
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN payload_nonce TEXT`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN replay_window_minutes INTEGER DEFAULT 30`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_pending_mutations ADD COLUMN replay_expires_at DATETIME`); } catch {}
+try {
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_drill_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runtime_id TEXT NOT NULL,
+      drill_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      score INTEGER,
+      details_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+} catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN replay_count INTEGER DEFAULT 0`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN stage_index INTEGER DEFAULT 1`); } catch {}
 try { sqliteDb.exec(`ALTER TABLE runtime_approvals ADD COLUMN total_stages INTEGER DEFAULT 1`); } catch {}
@@ -4815,6 +4828,12 @@ async function startServer() {
       const passedCount = checks.filter((c) => c.passed).length;
       const score = Math.round((passedCount / checks.length) * 100);
       const status = score >= 90 ? 'PRODUCTION_READY' : score >= 70 ? 'HARDENING_REQUIRED' : 'NOT_READY';
+      try {
+        sqliteDb.prepare(`
+          INSERT INTO runtime_drill_history (runtime_id, drill_type, status, score, details_json)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(runtimeId, 'readiness', status, score, JSON.stringify(checks));
+      } catch {}
 
       addGovernanceAction('READINESS_DRILL', 'GovernanceEngine', runtimeId, status);
       addRuntimeLog(score >= 90 ? 'success' : score >= 70 ? 'warning' : 'error', `Readiness drill for ${runtimeId}: ${status} (${score}%)`, 'governance_runtime');
@@ -4832,6 +4851,100 @@ async function startServer() {
     } catch (e: any) {
       res.status(500).json({ success: false, message: e.message || 'Readiness drill failed' });
     }
+  });
+
+  app.get("/api/runtime/:id/drills/history", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const rows = sqliteDb.prepare(`
+        SELECT id, runtime_id, drill_type, status, score, details_json, created_at
+        FROM runtime_drill_history
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100
+      `).all(runtimeId) as any[];
+      res.json({ success: true, data: rows });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message || 'Drill history fetch failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/compliance-audit-export", async (req, res) => {
+    try {
+      const runtimeId = String(req.params.id);
+      const approvals = sqliteDb.prepare(`
+        SELECT id, operation_type, approval_status, risk_level, requested_by, reviewed_by, requested_at, reviewed_at, chain_status
+        FROM runtime_approvals
+        WHERE runtime_id = ?
+        ORDER BY requested_at DESC
+        LIMIT 300
+      `).all(runtimeId) as any[];
+      const deploys = sqliteDb.prepare(`
+        SELECT deployment_id, deploy_status, risk_level, deploy_strategy, requested_by, created_at, executed_at
+        FROM runtime_deployments
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(runtimeId) as any[];
+      const recoveries = sqliteDb.prepare(`
+        SELECT recovery_id, snapshot_id, recovery_type, recovery_status, risk_level, requested_by, created_at
+        FROM runtime_recovery
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 200
+      `).all(runtimeId) as any[];
+      const governance = sqliteDb.prepare(`
+        SELECT id, action, performed_by, target, status, timestamp
+        FROM governance_actions
+        ORDER BY timestamp DESC
+        LIMIT 500
+      `).all() as any[];
+      const drills = sqliteDb.prepare(`
+        SELECT id, drill_type, status, score, created_at
+        FROM runtime_drill_history
+        WHERE runtime_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100
+      `).all(runtimeId) as any[];
+
+      const summary = {
+        approvals_total: approvals.length,
+        approvals_pending: approvals.filter((r) => String(r.approval_status).toUpperCase() === 'PENDING').length,
+        deploy_total: deploys.length,
+        deploy_failed: deploys.filter((r) => String(r.deploy_status).toUpperCase() === 'FAILED').length,
+        recoveries_total: recoveries.length,
+        recoveries_failed: recoveries.filter((r) => String(r.recovery_status).toUpperCase() === 'FAILED').length,
+        drills_total: drills.length
+      };
+
+      res.json({
+        success: true,
+        data: {
+          runtimeId,
+          exportedAt: new Date().toISOString(),
+          summary,
+          approvals,
+          deploys,
+          recoveries,
+          governance,
+          drills
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e.message || 'Compliance export failed' });
+    }
+  });
+
+  app.get("/api/runtime/:id/runbooks", async (req, res) => {
+    const runtimeId = String(req.params.id);
+    res.json({
+      success: true,
+      data: [
+        { id: 'rb-deploy-failure', title: 'Deploy Failure Recovery', runtimeId, steps: ['Validate runtime gates', 'Check PM2 status', 'Trigger rollback snapshot', 'Run readiness drill'] },
+        { id: 'rb-pm2-crash', title: 'PM2 Crash Recovery', runtimeId, steps: ['Inspect PM2 jlist', 'Restart target process', 'Validate port binding', 'Run readiness drill'] },
+        { id: 'rb-domain-route', title: 'Domain Route Recovery', runtimeId, steps: ['Validate nginx binding', 'Validate runtime port listener', 'Re-run runtime verification gates'] }
+      ]
+    });
   });
 
   // ==========================================
