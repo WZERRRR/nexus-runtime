@@ -1047,9 +1047,17 @@ async function startServer() {
     search: string;
     deliveredKeys: Set<string>;
   };
+  type RuntimeTelemetryClient = {
+    ws: WebSocket;
+    runtimeId?: string;
+    projectId?: string;
+    paused: boolean;
+  };
 
   const wsServer = new WebSocketServer({ server, path: "/ws/runtime/logs" });
+  const telemetryWsServer = new WebSocketServer({ server, path: "/ws/runtime/telemetry" });
   const streamClients = new Set<RuntimeStreamClient>();
+  const telemetryClients = new Set<RuntimeTelemetryClient>();
 
   const normalizeRuntimeLog = (row: any, fallbackService = 'runtime') => ({
     id: String(row?.id ?? `${row?.timestamp ?? Date.now()}`),
@@ -1169,9 +1177,99 @@ async function startServer() {
     });
   }, 1000);
 
+  const streamRuntimeTelemetry = async (client: RuntimeTelemetryClient) => {
+    if (client.paused || client.ws.readyState !== WebSocket.OPEN) return;
+    const runtimeId = client.runtimeId || "rt-core";
+    const eventsPromise = (async () => {
+      try {
+        const { RuntimeEvents } = await import('./server/runtime/runtimeEvents.js');
+        return await RuntimeEvents.getEvents(runtimeId, 20);
+      } catch {
+        return [];
+      }
+    })();
+
+    const [snapshot, events] = await Promise.all([
+      withTimeout(
+        Promise.resolve(getRuntimeTelemetry().then((telemetry) => ({
+          generatedAt: new Date().toISOString(),
+          nodes: [{
+            id: "local-host",
+            cpu: telemetry.cpu.usage,
+            ram: telemetry.memory.total ? Math.round((telemetry.memory.used / telemetry.memory.total) * 100) : 0,
+          }],
+          summary: {
+            activePorts: 0,
+            runtimePaths: 0,
+          },
+          system: {
+            memoryTotal: telemetry.memory.total,
+            memoryUsed: telemetry.memory.used,
+            uptimeSeconds: telemetry.os.uptime,
+            cpuCores: telemetry.cpu.cores,
+            hostname: telemetry.os.hostname,
+            runtimeLatencyMs: 0,
+          },
+          telemetry,
+        }))),
+        2500,
+        null,
+      ),
+      withTimeout(eventsPromise, 2500, []),
+    ]);
+
+    if (!snapshot) return;
+    client.ws.send(JSON.stringify({
+      type: 'telemetry',
+      data: {
+        runtimeId: runtimeId,
+        projectId: client.projectId || null,
+        snapshot,
+        events: Array.isArray(events) ? events : [],
+      },
+    }));
+  };
+
+  telemetryWsServer.on("connection", (ws) => {
+    const client: RuntimeTelemetryClient = { ws, paused: false };
+    telemetryClients.add(client);
+    ws.send(JSON.stringify({ type: "ready", data: { stream: "runtime-telemetry" } }));
+
+    ws.on("message", async (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "subscribe") {
+          client.runtimeId = msg.runtimeId ? String(msg.runtimeId) : undefined;
+          client.projectId = msg.projectId ? String(msg.projectId) : undefined;
+          await streamRuntimeTelemetry(client);
+          return;
+        }
+        if (msg.type === "pause") client.paused = true;
+        if (msg.type === "resume") {
+          client.paused = false;
+          await streamRuntimeTelemetry(client);
+        }
+      } catch {
+        ws.send(JSON.stringify({ type: "error", message: "Invalid telemetry stream message format" }));
+      }
+    });
+
+    ws.on("close", () => {
+      telemetryClients.delete(client);
+    });
+  });
+
+  const telemetryTicker = setInterval(() => {
+    telemetryClients.forEach((client) => {
+      streamRuntimeTelemetry(client).catch(() => undefined);
+    });
+  }, 3000);
+
   server.on("close", () => {
     clearInterval(streamTicker);
+    clearInterval(telemetryTicker);
     wsServer.close();
+    telemetryWsServer.close();
   });
 
   app.delete("/api/runtime/nodes/:nodeId", async (req, res) => {

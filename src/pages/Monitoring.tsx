@@ -50,6 +50,8 @@ export function Monitoring() {
   const [events, setEvents] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isStreamLive, setIsStreamLive] = useState(false);
+  const [isStreamPaused, setIsStreamPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -98,9 +100,58 @@ export function Monitoring() {
 
   useEffect(() => {
     loadMonitoring();
-    const interval = window.setInterval(() => loadMonitoring(true), 15000);
+    const interval = window.setInterval(() => {
+      if (!isStreamLive || isStreamPaused) {
+        loadMonitoring(true);
+      }
+    }, 30000);
     return () => window.clearInterval(interval);
-  }, [loadMonitoring]);
+  }, [isStreamLive, isStreamPaused, loadMonitoring]);
+
+  useEffect(() => {
+    const runtimeId = String(context?.runtime_id || context?.id || '');
+    const projectId = String(context?.id || '');
+    const stream = runtimeAPI.connectTelemetryStream(
+      {
+        onOpen: () => {
+          setIsStreamLive(true);
+          setError(null);
+        },
+        onData: (packet) => {
+          if (!packet?.snapshot) return;
+          const discovery = packet.snapshot;
+          setSnapshot(discovery);
+          setHistory((current) => {
+            const nodeRow = discovery.nodes?.[0];
+            const memoryPct = discovery.system?.memoryTotal
+              ? Math.round((discovery.system.memoryUsed / discovery.system.memoryTotal) * 100)
+              : Number(nodeRow?.ram || 0);
+            const point = {
+              time: new Date(discovery.generatedAt).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+              cpu: Math.round(Number(nodeRow?.cpu || 0)),
+              memory: memoryPct,
+              ports: discovery.summary?.activePorts || 0,
+              runtimes: discovery.summary?.runtimePaths || 0,
+            };
+            return [...current, point].slice(-24);
+          });
+          if (Array.isArray(packet.events)) {
+            setEvents(packet.events);
+          }
+        },
+        onError: (message) => {
+          setIsStreamLive(false);
+          setError(message);
+        },
+        onClose: () => {
+          setIsStreamLive(false);
+        },
+      },
+      { runtimeId: runtimeId || undefined, projectId: projectId || undefined, paused: isStreamPaused },
+    );
+
+    return () => stream.close();
+  }, [context?.id, context?.runtime_id, isStreamPaused]);
 
   const node = snapshot?.nodes?.[0];
   const memoryPercent = snapshot?.system?.memoryTotal
@@ -160,9 +211,21 @@ export function Monitoring() {
               <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin text-blue-400')} />
               تحديث الحالة
             </button>
+            <button
+              onClick={() => {
+                setIsStreamPaused((prev) => {
+                  const next = !prev;
+                  showToast(next ? 'تم إيقاف البث الحي مؤقتًا' : 'تم استئناف البث الحي');
+                  return next;
+                });
+              }}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 transition-all hover:bg-slate-300 dark:border-white/5 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+            >
+              {isStreamPaused ? 'استئناف البث' : 'إيقاف البث'}
+            </button>
             <span className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-400">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              مراقبة فعلية
+              {isStreamLive ? 'مراقبة حيّة' : 'مراقبة فعلية'}
             </span>
           </div>
         }

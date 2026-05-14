@@ -34,6 +34,61 @@ export interface RuntimeLog {
 }
 
 class RuntimeAPI {
+  connectTelemetryStream(
+    handlers: {
+      onOpen?: () => void;
+      onData?: (payload: any) => void;
+      onError?: (message: string) => void;
+      onClose?: () => void;
+    },
+    options?: {
+      runtimeId?: string;
+      projectId?: string;
+      paused?: boolean;
+    }
+  ) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/runtime/telemetry`);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        runtimeId: options?.runtimeId,
+        projectId: options?.projectId,
+      }));
+      if (options?.paused) {
+        ws.send(JSON.stringify({ type: 'pause' }));
+      }
+      handlers.onOpen?.();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'telemetry') {
+          handlers.onData?.(payload.data);
+        } else if (payload.type === 'error') {
+          handlers.onError?.(payload.message || 'Telemetry stream error');
+        }
+      } catch {
+        handlers.onError?.('Invalid telemetry stream payload');
+      }
+    };
+
+    ws.onerror = () => handlers.onError?.('Telemetry stream connection failed');
+    ws.onclose = () => handlers.onClose?.();
+
+    return {
+      pause: () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pause' }));
+      },
+      resume: () => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resume' }));
+      },
+      close: () => ws.close(),
+    };
+  }
+
   async getTelemetry(): Promise<any> {
     try {
       const res = await fetch('/api/runtime/telemetry');
