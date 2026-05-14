@@ -6,42 +6,6 @@ import { cn } from '../lib/utils';
 import { RuntimeErrorAlert } from '../components/common/RuntimeErrorAlert';
 import { runtimeAPI } from '../services/runtimeApi';
 
-const INITIAL_PROJECTS = [
- {
- id: 1,
- name: 'DevCore Plus API',
- type: 'Laravel API',
- repo: 'devcore/api-core',
- prodDomain: 'api.devcore.com',
- environments: [
- { name: 'LIVE', branch: 'main', status: 'online', version: 'v2.4.0', lastDeploy: '2 hours ago', path: '/var/www/api-live' },
- { name: 'STAGING', branch: 'staging', status: 'online', version: 'v2.5.0-rc', lastDeploy: '1 day ago', path: '/var/www/api-staging' },
- { name: 'DEV', branch: 'develop', status: 'online', version: 'v2.5.x-dev', lastDeploy: '15 mins ago', path: '/var/www/api-dev' },
- ]
- },
- {
- id: 2,
- name: 'DevCore Admin Panel',
- type: 'Next.js Frontend',
- repo: 'devcore/admin-frontend',
- prodDomain: 'admin.devcore.com',
- environments: [
- { name: 'LIVE', branch: 'main', status: 'online', version: 'v1.8.2', lastDeploy: '5 days ago', path: '/var/www/admin-live' },
- { name: 'DEV', branch: 'develop', status: 'online', version: 'v1.9.0-dev', lastDeploy: '1 hour ago', path: '/var/www/admin-dev' },
- ]
- },
- {
- id: 3,
- name: 'DevCore WebSockets',
- type: 'Node.js Socket.IO',
- repo: 'devcore/wss-server',
- prodDomain: 'ws.devcore.com',
- environments: [
- { name: 'LIVE', branch: 'main', status: 'online', version: 'v1.2.0', lastDeploy: '10 days ago', path: '/var/www/wss-live' },
- ]
- }
-];
-
 export function Projects() {
  const navigate = useNavigate();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -59,7 +23,7 @@ export function Projects() {
   const [isAddEnvModalOpen, setIsAddEnvModalOpen] = useState<{projectId: string | number | null, open: boolean}>({projectId: null, open: false});
  const [toast, setToast] = useState<{ id: string, message: string, type: 'success' | 'error'} | null>(null);
 
- const [projects, setProjects] = useState<typeof INITIAL_PROJECTS>([]);
+ const [projects, setProjects] = useState<any[]>([]);
  const [isLoading, setIsLoading] = useState(true);
  const [isRefreshing, setIsRefreshing] = useState(false);
  const [error, setError] = useState<string | null>(null);
@@ -83,7 +47,7 @@ export function Projects() {
           }
         ]
       }));
-      setProjects(normalized.length > 0 ? normalized : INITIAL_PROJECTS);
+      setProjects(normalized);
     } catch (err) {
       setError('فشل مزامنة المشاريع. يرجى التحقق من الخادم.');
     } finally {
@@ -420,7 +384,14 @@ export function Projects() {
       </div>
     </div>
     
-    <div className="flex items-center gap-3 relative z-10 justify-end w-full lg:w-auto">
+      <div className="flex items-center gap-3 relative z-10 justify-end w-full lg:w-auto">
+      <button
+        onClick={() => navigate(`/projects/${project.id}/workspace`, { state: { project } })}
+        className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all shadow-[0_10px_20px_-5px_rgba(16,185,129,0.4)] hover:shadow-[0_15px_30px_-5px_rgba(16,185,129,0.4)] active:scale-95"
+      >
+        <FolderOpen className="w-4 h-4" />
+        فتح Workspace
+      </button>
       <button 
         onClick={() => setIsAddEnvModalOpen({ projectId: project.id, open: true })}
         className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl transition-all shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] hover:shadow-[0_15px_30px_-5px_rgba(37,99,235,0.4)] active:scale-95 group/add"

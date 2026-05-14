@@ -13,6 +13,7 @@ const AIMonitor = lazy(() => import('./pages/AIMonitor').then(module => ({ defau
 const Monitoring = lazy(() => import('./pages/Monitoring').then(module => ({ default: module.Monitoring })));
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })));
 const Projects = lazy(() => import('./pages/Projects').then(module => ({ default: module.Projects })));
+const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace').then(module => ({ default: module.ProjectWorkspace })));
 const LaravelCenter = lazy(() => import('./pages/Laravel').then(module => ({ default: module.LaravelCenter })));
 const FrontendCenter = lazy(() => import('./pages/Frontend').then(module => ({ default: module.FrontendCenter })));
 const MobileAppsCenter = lazy(() => import('./pages/MobileApps').then(module => ({ default: module.MobileAppsCenter })));
@@ -61,6 +62,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="servers" element={<Servers />} />
             <Route path="projects" element={<Projects />} />
+            <Route path="projects/:id/workspace" element={<ProjectWorkspace />} />
             <Route path="deploy" element={<Deploy />} />
             <Route path="monitoring" element={<Monitoring />} />
             <Route path="pm2" element={<PM2Manager />} />
