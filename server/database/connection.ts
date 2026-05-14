@@ -2,12 +2,15 @@ import mysql from 'mysql2/promise';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 let mysqlPool: mysql.Pool | null = null;
 let betterDb: any = null;
 export let isMySQL = false;
 
 let connectionPromise: Promise<any> | null = null;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export async function getConnection() {
   if (connectionPromise) return connectionPromise;
@@ -33,7 +36,7 @@ export async function getConnection() {
         console.warn('[Runtime DB] MySQL credentials not found. Falling back to better-sqlite3 (compatible binary)...');
         isMySQL = false;
         
-        const dbDir = path.join(process.cwd(), 'runtime', 'data');
+        const dbDir = path.join(__dirname, '..', 'data');
         if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
         const dbPath = path.join(dbDir, 'nexus_runtime_v2.db');
