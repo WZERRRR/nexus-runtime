@@ -68,6 +68,8 @@ export function ProjectWorkspace() {
   const [terminalInput, setTerminalInput] = useState('');
   const [terminalOutput, setTerminalOutput] = useState<string[]>([]);
   const [terminalRunning, setTerminalRunning] = useState(false);
+  const [filesystemItems, setFilesystemItems] = useState<any[]>([]);
+  const [filesystemLoading, setFilesystemLoading] = useState(false);
 
   const inFlightRef = useRef(false);
 
@@ -144,6 +146,22 @@ export function ProjectWorkspace() {
     }, 15000);
     return () => clearInterval(timer);
   }, [project]);
+
+  useEffect(() => {
+    const loadFilesystem = async () => {
+      if (!project || activeTab !== 'filesystem') return;
+      setFilesystemLoading(true);
+      try {
+        const items = await runtimeAPI.listFiles('.', project.runtime_path, project.id);
+        setFilesystemItems(Array.isArray(items) ? items : []);
+      } catch {
+        setFilesystemItems([]);
+      } finally {
+        setFilesystemLoading(false);
+      }
+    };
+    loadFilesystem();
+  }, [activeTab, project]);
 
   const runtimeStatus = useMemo(() => String(project?.status || 'unknown').toUpperCase(), [project]);
 
@@ -527,6 +545,58 @@ export function ProjectWorkspace() {
                         </div>
                       ))}
                     </div>
+                  )}
+                  {activeTab === 'filesystem' && (
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      {filesystemLoading ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">جاري تحميل بيانات الملفات التشغيلية...</p>
+                      ) : filesystemItems.length === 0 ? (
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                      ) : filesystemItems.slice(0, 40).map((item: any, idx: number) => (
+                        <div key={`${item.path || item.name || 'item'}-${idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-slate-500">{item.isDirectory ? 'DIR' : 'FILE'}</span>
+                          <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{item.name || item.path}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'monitoring' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">CPU</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics?.cpu?.usagePercent ?? 'N/A'}%</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">RAM</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics?.ram?.usagePercent ?? 'N/A'}%</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Disk</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics?.disk?.usagePercent ?? 'N/A'}%</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Network</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics?.network?.status || 'N/A'}</p>
+                      </div>
+                    </div>
+                  )}
+                  {activeTab === 'terminal' && (
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">الطرفية التشغيلية متاحة في لوحة Persistent Runtime Terminal بالأسفل.</p>
+                  )}
+                  {activeTab === 'git' && (
+                    <div className="space-y-2">
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Git Branch</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{project.git_branch || 'N/A'}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Runtime Source</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{project.source || project.runtime_source || 'N/A'}</p>
+                      </div>
+                    </div>
+                  )}
+                  {(activeTab === 'database' || activeTab === 'apis') && (
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                   )}
                 </div>
               </div>
