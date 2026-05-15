@@ -70,6 +70,7 @@ export function ProjectWorkspace() {
   const [terminalRunning, setTerminalRunning] = useState(false);
   const [filesystemItems, setFilesystemItems] = useState<any[]>([]);
   const [filesystemLoading, setFilesystemLoading] = useState(false);
+  const [filesystemQuery, setFilesystemQuery] = useState('');
 
   const inFlightRef = useRef(false);
 
@@ -171,6 +172,16 @@ export function ProjectWorkspace() {
 
   const onlinePm2Count = useMemo(() => pm2Processes.filter((p) => String(p?.status || '').toLowerCase() === 'online').length, [pm2Processes]);
   const activeTabLabel = useMemo(() => WORKSPACE_TABS.find((tab) => tab.id === activeTab)?.label || 'Workspace', [activeTab]);
+  const filesystemStats = useMemo(() => {
+    const files = filesystemItems.filter((item) => !item?.isDirectory).length;
+    const dirs = filesystemItems.filter((item) => !!item?.isDirectory).length;
+    return { files, dirs, total: filesystemItems.length };
+  }, [filesystemItems]);
+  const filteredFilesystemItems = useMemo(() => {
+    const q = filesystemQuery.trim().toLowerCase();
+    if (!q) return filesystemItems;
+    return filesystemItems.filter((item) => String(item?.name || item?.path || '').toLowerCase().includes(q));
+  }, [filesystemItems, filesystemQuery]);
 
   const healthLabel = useMemo(() => {
     if (!runtimeMetrics && pm2Processes.length === 0) return 'UNKNOWN';
@@ -547,17 +558,39 @@ export function ProjectWorkspace() {
                     </div>
                   )}
                   {activeTab === 'filesystem' && (
-                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                          <p className="text-[10px] text-slate-500">Total</p>
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{filesystemStats.total}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                          <p className="text-[10px] text-slate-500">Directories</p>
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{filesystemStats.dirs}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                          <p className="text-[10px] text-slate-500">Files</p>
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{filesystemStats.files}</p>
+                        </div>
+                        <input
+                          value={filesystemQuery}
+                          onChange={(e) => setFilesystemQuery(e.target.value)}
+                          placeholder="بحث داخل الملفات"
+                          className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 px-2 py-1.5 text-xs text-slate-700 dark:text-slate-100 outline-none"
+                        />
+                      </div>
+                      <div className="space-y-2 max-h-52 overflow-auto pr-1">
                       {filesystemLoading ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">جاري تحميل بيانات الملفات التشغيلية...</p>
-                      ) : filesystemItems.length === 0 ? (
+                      ) : filteredFilesystemItems.length === 0 ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
-                      ) : filesystemItems.slice(0, 40).map((item: any, idx: number) => (
+                      ) : filteredFilesystemItems.slice(0, 40).map((item: any, idx: number) => (
                         <div key={`${item.path || item.name || 'item'}-${idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2 flex items-center justify-between gap-2">
                           <span className="text-[10px] text-slate-500">{item.isDirectory ? 'DIR' : 'FILE'}</span>
                           <span className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{item.name || item.path}</span>
                         </div>
                       ))}
+                    </div>
                     </div>
                   )}
                   {activeTab === 'monitoring' && (
@@ -577,6 +610,14 @@ export function ProjectWorkspace() {
                       <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
                         <p className="text-[10px] text-slate-500">Network</p>
                         <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeMetrics?.network?.status || 'N/A'}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Health</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{healthLabel}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+                        <p className="text-[10px] text-slate-500">Last Sync</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{lastSync ? new Date(lastSync).toLocaleTimeString('ar-SA') : 'N/A'}</p>
                       </div>
                     </div>
                   )}
