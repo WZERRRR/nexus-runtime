@@ -602,14 +602,8 @@ export function ProjectWorkspace() {
                 </div>
                 <div className="mt-3">
                   {activeTab === 'pm2' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-slate-500">Deployments: {deployments.length}</p>
-                        <button onClick={handleRunDeploy} disabled={deployRunning} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold disabled:opacity-60">
-                          {deployRunning ? 'Running...' : 'Run Governed Deploy'}
-                        </button>
-                      </div>
-                      <div className="space-y-2 max-h-44 overflow-auto pr-1">
+                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                      <div className="space-y-2">
                       {pm2Processes.length === 0 ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : pm2Processes.map((proc: any) => (
