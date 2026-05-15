@@ -126,7 +126,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     const load = async () => {
       if (!id) {
-        setError('Project ID is missing');
+        setError('معرف المشروع غير متوفر');
         setIsLoading(false);
         return;
       }
@@ -296,7 +296,7 @@ export function ProjectWorkspace() {
         if (res.data.stdout) setTerminalOutput((prev) => [...prev, res.data!.stdout]);
         if (res.data.stderr) setTerminalOutput((prev) => [...prev, res.data!.stderr]);
       } else {
-        setTerminalOutput((prev) => [...prev, res?.message || 'لا توجد بيانات تشغيلية حالياً']);
+        setTerminalOutput((prev) => [...prev, res?.message || EMPTY_OPERATIONAL]);
       }
     } catch {
       setTerminalOutput((prev) => [...prev, 'خطأ أثناء تنفيذ الأمر']);
@@ -429,7 +429,7 @@ export function ProjectWorkspace() {
       setOperationNotice({ type: 'success', message: 'تمت إعادة تنفيذ العملية بنجاح' });
       await loadOperationalData(project);
     } catch {
-      setOperationNotice({ type: 'error', message: 'تعذر تنفيذ طلب Replay' });
+      setOperationNotice({ type: 'error', message: 'تعذر تنفيذ طلب إعادة التشغيل' });
     }
   };
 
@@ -456,13 +456,13 @@ export function ProjectWorkspace() {
   };
 
   if (isLoading) {
-    return <div className="text-slate-400 text-sm">جاري تحميل Runtime Workspace...</div>;
+    return <div className="text-slate-400 text-sm">جاري تحميل مساحة العمل التشغيلية...</div>;
   }
 
   if (error || !project) {
     return (
       <div className="glass-panel rounded-xl p-6 border border-slate-200 dark:border-slate-800/50">
-        <p className="text-red-400 font-bold">{error || 'تعذر تحميل المشروع'}</p>
+        <p className="text-red-400 font-bold">{error || 'تعذر تحميل بيانات المشروع'}</p>
       </div>
     );
   }
@@ -472,7 +472,7 @@ export function ProjectWorkspace() {
       <div className="glass-panel rounded-xl border border-slate-200 dark:border-slate-800/50 p-3 md:p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Operational Runtime IDE Workspace</p>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Operational Runtime Workspace</p>
             <h1 className="text-lg md:text-xl font-black text-white">{project.name}</h1>
           </div>
           <div className="flex items-center gap-2">
