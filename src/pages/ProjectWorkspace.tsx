@@ -35,6 +35,13 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.Rea
 ];
 
 type TimelineFilter = 'all' | 'approval' | 'mutation' | 'deploy' | 'recovery';
+type AiPlanStep =
+  | { kind: 'refresh'; label: string }
+  | { kind: 'deploy'; label: string }
+  | { kind: 'readiness'; label: string }
+  | { kind: 'git'; label: string; command: string }
+  | { kind: 'pm2'; label: string; action: 'restart' | 'stop' }
+  | { kind: 'tab'; label: string; tab: WorkspaceTabId };
 const EMPTY_OPERATIONAL = 'لا توجد بيانات تشغيلية حالياً';
 
 export function ProjectWorkspace() {
@@ -75,6 +82,10 @@ export function ProjectWorkspace() {
   const [filesystemQuery, setFilesystemQuery] = useState('');
   const [deployRunning, setDeployRunning] = useState(false);
   const [rollbackRunningId, setRollbackRunningId] = useState<string | null>(null);
+  const [aiCommand, setAiCommand] = useState('');
+  const [aiPlan, setAiPlan] = useState<AiPlanStep[]>([]);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiLog, setAiLog] = useState<string[]>([]);
 
   const inFlightRef = useRef(false);
 
@@ -273,6 +284,86 @@ export function ProjectWorkspace() {
   }, [mutationTimeline, runtimeEvents, deployments, recoveries, governanceEvents, timelineFilter]);
 
   const terminalContext = useMemo(() => `${project?.name || 'runtime'}:${project?.runtime_path || '.'}`, [project]);
+
+  const parseAiPlan = (input: string): AiPlanStep[] => {
+    const q = input.toLowerCase();
+    const steps: AiPlanStep[] = [];
+    if (q.includes('overview') || q.includes('نظرة') || q.includes('ملخص')) steps.push({ kind: 'tab', label: 'Open Overview', tab: 'overview' });
+    if (q.includes('filesystem') || q.includes('files') || q.includes('ملفات')) steps.push({ kind: 'tab', label: 'Open Filesystem', tab: 'filesystem' });
+    if (q.includes('terminal') || q.includes('طرفية')) steps.push({ kind: 'tab', label: 'Open Terminal', tab: 'terminal' });
+    if (q.includes('pm2')) steps.push({ kind: 'tab', label: 'Open PM2', tab: 'pm2' });
+    if (q.includes('deploy') || q.includes('نشر')) steps.push({ kind: 'deploy', label: 'Run governed deploy' });
+    if (q.includes('readiness') || q.includes('جاهزية') || q.includes('drill')) steps.push({ kind: 'readiness', label: 'Run readiness drill' });
+    if ((q.includes('restart') || q.includes('اعادة تشغيل') || q.includes('إعادة تشغيل')) && q.includes('pm2')) {
+      steps.push({ kind: 'pm2', label: 'Restart PM2 processes', action: 'restart' });
+    }
+    if ((q.includes('stop') || q.includes('ايقاف') || q.includes('إيقاف')) && q.includes('pm2')) {
+      steps.push({ kind: 'pm2', label: 'Stop PM2 processes', action: 'stop' });
+    }
+    if (q.includes('git pull') || (q.includes('git') && q.includes('pull'))) steps.push({ kind: 'git', label: 'Git pull', command: 'git pull' });
+    if (q.includes('git status') || (q.includes('git') && q.includes('status'))) steps.push({ kind: 'git', label: 'Git status', command: 'git status --short' });
+    if (q.includes('git log') || (q.includes('git') && q.includes('log'))) steps.push({ kind: 'git', label: 'Git log', command: 'git log --oneline -n 10' });
+    if (q.includes('logs') || q.includes('سجل') || q.includes('سجلات')) steps.push({ kind: 'tab', label: 'Open Logs', tab: 'logs' });
+    if (q.includes('monitor') || q.includes('مراقبة')) steps.push({ kind: 'tab', label: 'Open Monitoring', tab: 'monitoring' });
+    if (q.includes('refresh') || q.includes('تحديث')) steps.push({ kind: 'refresh', label: 'Refresh operational data' });
+    if (steps.length === 0) steps.push({ kind: 'refresh', label: 'Refresh operational data' });
+    return steps;
+  };
+
+  const handleBuildAiPlan = () => {
+    const plan = parseAiPlan(aiCommand.trim());
+    setAiPlan(plan);
+    setAiLog((prev) => [`Plan created with ${plan.length} step(s).`, ...prev].slice(0, 40));
+  };
+
+  const handleRunAiPlan = async () => {
+    if (!project || aiRunning || aiPlan.length === 0) return;
+    setAiRunning(true);
+    try {
+      for (let idx = 0; idx < aiPlan.length; idx += 1) {
+        const step = aiPlan[idx];
+        setAiLog((prev) => [`[${idx + 1}/${aiPlan.length}] ${step.label}`, ...prev].slice(0, 40));
+        if (step.kind === 'tab') {
+          setActiveTab(step.tab);
+          continue;
+        }
+        if (step.kind === 'refresh') {
+          await handleRefresh();
+          continue;
+        }
+        if (step.kind === 'deploy') {
+          await handleRunDeploy();
+          continue;
+        }
+        if (step.kind === 'readiness') {
+          await handleReadinessDrill();
+          continue;
+        }
+        if (step.kind === 'git') {
+          await runScopedCommand(step.command);
+          continue;
+        }
+        if (step.kind === 'pm2') {
+          if (pm2Processes.length === 0) {
+            setAiLog((prev) => [`No PM2 processes found for ${step.action}.`, ...prev].slice(0, 40));
+            continue;
+          }
+          for (const proc of pm2Processes) {
+            const rawId = proc?.id ?? proc?.pm_id ?? proc?.pid;
+            const numericId = Number(rawId);
+            if (!Number.isFinite(numericId)) continue;
+            await runtimeAPI.performPM2Action(step.action, numericId, project.id);
+          }
+          await loadOperationalData(project);
+        }
+      }
+      setOperationNotice({ type: 'success', message: `تم تنفيذ خطة AI بعدد ${aiPlan.length} خطوة` });
+    } catch (e: any) {
+      setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ خطة AI' });
+    } finally {
+      setAiRunning(false);
+    }
+  };
 
   const handleRefresh = async () => {
     if (!project || isRefreshing) return;
@@ -485,6 +576,51 @@ export function ProjectWorkspace() {
             <button onClick={handleRefresh} disabled={isRefreshing} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-[11px] font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900/50 disabled:opacity-60">
               {isRefreshing ? 'تحديث...' : 'تحديث'}
             </button>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/40 p-2">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-2">AI Operator</p>
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
+            <input
+              value={aiCommand}
+              onChange={(e) => setAiCommand(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleBuildAiPlan()}
+              placeholder="اكتب أمر تشغيلي: مثال (نشر ثم تحديث ثم فحص الجاهزية)"
+              className="flex-1 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/60 px-3 py-2 text-xs text-slate-700 dark:text-slate-100 outline-none"
+            />
+            <button onClick={handleBuildAiPlan} className="px-3 py-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-bold">
+              Build Plan
+            </button>
+            <button onClick={handleRunAiPlan} disabled={aiRunning || aiPlan.length === 0} className="px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-300 text-xs font-bold disabled:opacity-60">
+              {aiRunning ? 'Running...' : 'Run Plan'}
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+              <p className="text-[10px] text-slate-500 mb-1">Planned Steps</p>
+              {aiPlan.length === 0 ? (
+                <p className="text-xs text-slate-600 dark:text-slate-300">{EMPTY_OPERATIONAL}</p>
+              ) : (
+                <div className="space-y-1 max-h-20 overflow-auto pr-1">
+                  {aiPlan.map((step, idx) => (
+                    <p key={`${step.label}-${idx}`} className="text-xs text-slate-700 dark:text-slate-200">{idx + 1}. {step.label}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+              <p className="text-[10px] text-slate-500 mb-1">Execution Log</p>
+              {aiLog.length === 0 ? (
+                <p className="text-xs text-slate-600 dark:text-slate-300">{EMPTY_OPERATIONAL}</p>
+              ) : (
+                <div className="space-y-1 max-h-20 overflow-auto pr-1">
+                  {aiLog.map((line, idx) => (
+                    <p key={`${line}-${idx}`} className="text-xs text-slate-700 dark:text-slate-200">{line}</p>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
