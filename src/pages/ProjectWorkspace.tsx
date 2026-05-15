@@ -639,7 +639,6 @@ export function ProjectWorkspace() {
                 <div className="mt-3">
                   {activeTab === 'pm2' && (
                     <div className="space-y-2 max-h-52 overflow-auto pr-1">
-                      <div className="space-y-2">
                       {pm2Processes.length === 0 ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : pm2Processes.map((proc: any) => (
@@ -654,7 +653,6 @@ export function ProjectWorkspace() {
                           <p className="text-[11px] text-slate-500">Status: {proc.status || 'unknown'} | CPU: {proc.cpu || 'N/A'} | RAM: {proc.ram || proc.mem || 'N/A'} | Uptime: {proc.uptime || 'N/A'}</p>
                         </div>
                       ))}
-                      </div>
                     </div>
                   )}
                   {activeTab === 'logs' && (
