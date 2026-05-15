@@ -826,8 +826,11 @@ export function ProjectWorkspace() {
                       ))}
                     </div>
                   )}
-                  {(activeTab === 'database' || activeTab === 'apis') && (
-                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
+                  {activeTab === 'database' && databaseRows.length === 0 && (
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">{EMPTY_OPERATIONAL}</p>
+                  )}
+                  {activeTab === 'apis' && apiLogRows.length === 0 && (
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">{EMPTY_OPERATIONAL}</p>
                   )}
                 </div>
               </div>
