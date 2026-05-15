@@ -104,7 +104,18 @@ export function ProjectWorkspace() {
     setDeployments(Array.isArray(deployRows) ? deployRows : []);
     setSnapshots(Array.isArray(snapshotRows) ? snapshotRows : []);
     setRecoveries(Array.isArray(recoveryRows) ? recoveryRows : []);
-    setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
+    const scopedGovernanceRows = Array.isArray(governanceRows)
+      ? governanceRows.filter((row: any) => {
+          const rowRuntimeId = String(row?.runtime_id || row?.runtimeId || row?.target_runtime_id || '');
+          const rowProjectId = String(row?.project_id || row?.projectId || row?.target_project_id || '');
+          const currentRuntimeId = String(runtimeId || '');
+          const currentProjectId = String(resolvedProject?.id || '');
+          if (rowRuntimeId && currentRuntimeId) return rowRuntimeId === currentRuntimeId;
+          if (rowProjectId && currentProjectId) return rowProjectId === currentProjectId;
+          return false;
+        })
+      : [];
+    setGovernanceEvents(scopedGovernanceRows);
     setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
     setPendingMutations(Array.isArray(pendingRows) ? pendingRows : []);
     setMutationTimeline(Array.isArray(mutationTimelineRows) ? mutationTimelineRows : []);
