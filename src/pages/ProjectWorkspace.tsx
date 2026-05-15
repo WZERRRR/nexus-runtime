@@ -287,6 +287,35 @@ export function ProjectWorkspace() {
   }, [mutationTimeline, runtimeEvents, deployments, recoveries, governanceEvents, timelineFilter]);
 
   const terminalContext = useMemo(() => `${project?.name || 'runtime'}:${project?.runtime_path || '.'}`, [project]);
+  const verifyRuntimeState = async (): Promise<AiExecutionEntry[]> => {
+    if (!project) return [{ step: 'Runtime verification', status: 'skipped', detail: 'No project context' }];
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    const [envs, pm2, metrics] = await Promise.all([
+      runtimeAPI.getProjectEnvironmentBindings(project.id).catch(() => []),
+      runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
+      runtimeAPI.getMetrics(runtimeId).catch(() => null),
+    ]);
+    const entries: AiExecutionEntry[] = [];
+    const validEnv = Array.isArray(envs) ? envs.find((e: any) => !!e?.validated && !!e?.realDomain && !!e?.runtimePort) : null;
+    entries.push({
+      step: 'Route/Domain Gate',
+      status: validEnv ? 'ok' : 'failed',
+      detail: validEnv ? `Domain ${validEnv.realDomain} bound` : 'No validated environment binding found',
+    });
+    const onlinePm2 = Array.isArray(pm2) ? pm2.filter((p: any) => String(p?.status || '').toLowerCase() === 'online').length : 0;
+    entries.push({
+      step: 'PM2 Health Gate',
+      status: onlinePm2 > 0 ? 'ok' : 'failed',
+      detail: onlinePm2 > 0 ? `${onlinePm2} process(es) online` : 'No online PM2 process detected',
+    });
+    const cpuOk = metrics?.cpu?.usagePercent === undefined || Number(metrics?.cpu?.usagePercent) < 95;
+    entries.push({
+      step: 'Telemetry Gate',
+      status: cpuOk ? 'ok' : 'failed',
+      detail: cpuOk ? 'Telemetry within threshold' : `High CPU usage: ${metrics?.cpu?.usagePercent}%`,
+    });
+    return entries;
+  };
 
   const parseAiPlan = (input: string): AiPlanStep[] => {
     const q = input.toLowerCase();
@@ -394,6 +423,13 @@ export function ProjectWorkspace() {
           failed += 1;
         }
       }
+      const verificationEntries = await verifyRuntimeState();
+      verificationEntries.forEach((entry) => {
+        entries.push(entry);
+        if (entry.status === 'ok') ok += 1;
+        else if (entry.status === 'failed') failed += 1;
+        else skipped += 1;
+      });
       setOperationNotice({ type: 'success', message: `تم تنفيذ خطة AI بعدد ${aiPlan.length} خطوة` });
     } catch (e: any) {
       setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ خطة AI' });
