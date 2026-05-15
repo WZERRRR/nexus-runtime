@@ -293,6 +293,24 @@ export function ProjectWorkspace() {
       setTerminalRunning(false);
     }
   };
+  const runScopedCommand = async (cmd: string) => {
+    if (!project || !cmd.trim()) return;
+    setTerminalRunning(true);
+    setTerminalOutput((prev) => [...prev, `> ${cmd}`]);
+    try {
+      const res = await runtimeAPI.executeTerminalCommand(cmd, project.runtime_path || undefined, project.id);
+      if (res?.success && res.data) {
+        if (res.data.stdout) setTerminalOutput((prev) => [...prev, res.data.stdout]);
+        if (res.data.stderr) setTerminalOutput((prev) => [...prev, res.data.stderr]);
+      } else {
+        setTerminalOutput((prev) => [...prev, res?.message || EMPTY_OPERATIONAL]);
+      }
+    } catch {
+      setTerminalOutput((prev) => [...prev, 'خطأ أثناء تنفيذ الأمر']);
+    } finally {
+      setTerminalRunning(false);
+    }
+  };
 
   const handlePm2Action = async (action: 'restart' | 'stop', procId: any) => {
     if (!project || procId === undefined || procId === null) return;
@@ -575,8 +593,26 @@ export function ProjectWorkspace() {
                     </button>
                   )}
                   {activeTab === 'git' && (
-                    <button onClick={() => { setTerminalInput('git pull'); handleTerminalCommand(); }} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">
-                      Git Pull (Governed)
+                    <>
+                      <button onClick={() => runScopedCommand('git status --short')} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">
+                        Git Status
+                      </button>
+                      <button onClick={() => runScopedCommand('git pull')} className="px-2 py-1 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-[10px] font-bold">
+                        Git Pull
+                      </button>
+                      <button onClick={() => runScopedCommand('git log --oneline -n 5')} className="px-2 py-1 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold">
+                        Recent Commits
+                      </button>
+                    </>
+                  )}
+                  {activeTab === 'database' && (
+                    <button onClick={() => runScopedCommand('ls')} className="px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">
+                      Runtime Validation
+                    </button>
+                  )}
+                  {activeTab === 'apis' && (
+                    <button onClick={handleRefresh} disabled={isRefreshing} className="px-2 py-1 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 text-[10px] font-bold disabled:opacity-60">
+                      Refresh API Signals
                     </button>
                   )}
                   {activeTab === 'environments' && (
