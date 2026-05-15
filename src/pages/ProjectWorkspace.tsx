@@ -35,6 +35,7 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTabId; label: string; icon: React.Rea
 ];
 
 type TimelineFilter = 'all' | 'approval' | 'mutation' | 'deploy' | 'recovery';
+const EMPTY_OPERATIONAL = 'لا توجد بيانات تشغيلية حالياً';
 
 export function ProjectWorkspace() {
   const { id } = useParams();
@@ -187,6 +188,14 @@ export function ProjectWorkspace() {
     if (!q) return filesystemItems;
     return filesystemItems.filter((item) => String(item?.name || item?.path || '').toLowerCase().includes(q));
   }, [filesystemItems, filesystemQuery]);
+  const apiLogRows = useMemo(
+    () => runtimeLogs.filter((log: any) => String(log?.message || '').toLowerCase().includes('/api')).slice(0, 20),
+    [runtimeLogs]
+  );
+  const databaseRows = useMemo(() => {
+    if (!Array.isArray(project?.databases)) return [];
+    return project.databases;
+  }, [project]);
 
   const healthLabel = useMemo(() => {
     if (!runtimeMetrics && pm2Processes.length === 0) return 'UNKNOWN';
@@ -541,6 +550,24 @@ export function ProjectWorkspace() {
                   Project: {project.name} | Runtime ID: {project.runtime_id || project.id} | Path: {project.runtime_path || 'N/A'} | Environment: {project.env || 'N/A'}
                 </p>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-blue-400 mt-3">Module: {activeTabLabel}</p>
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="rounded-md border border-slate-200 dark:border-white/10 px-2 py-1.5 bg-white dark:bg-slate-900/40">
+                    <p className="text-[10px] text-slate-500">Logs</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeLogs.length}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 dark:border-white/10 px-2 py-1.5 bg-white dark:bg-slate-900/40">
+                    <p className="text-[10px] text-slate-500">Events</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{runtimeEvents.length}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 dark:border-white/10 px-2 py-1.5 bg-white dark:bg-slate-900/40">
+                    <p className="text-[10px] text-slate-500">Deployments</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{deployments.length}</p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 dark:border-white/10 px-2 py-1.5 bg-white dark:bg-slate-900/40">
+                    <p className="text-[10px] text-slate-500">Snapshots</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{snapshots.length}</p>
+                  </div>
+                </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   {activeTab === 'deploy' && (
                     <button onClick={handleRunDeploy} disabled={deployRunning} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold disabled:opacity-60">
@@ -749,6 +776,26 @@ export function ProjectWorkspace() {
                         <p className="text-[10px] text-slate-500">Runtime Source</p>
                         <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{project.source || project.runtime_source || 'N/A'}</p>
                       </div>
+                    </div>
+                  )}
+                  {activeTab === 'database' && databaseRows.length > 0 && (
+                    <div className="space-y-2 max-h-44 overflow-auto pr-1">
+                      {databaseRows.slice(0, 20).map((db: any, idx: number) => (
+                        <div key={`${db?.name || 'db'}-${idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{db?.name || 'database'}</p>
+                          <p className="text-[11px] text-slate-500">Engine: {db?.engine || 'N/A'} | Status: {db?.status || 'N/A'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeTab === 'apis' && apiLogRows.length > 0 && (
+                    <div className="space-y-2 max-h-44 overflow-auto pr-1">
+                      {apiLogRows.map((log: any, idx: number) => (
+                        <div key={`${log.id || idx}-${log.timestamp || idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
+                          <p className="text-[11px] text-slate-500">{log.timestamp || 'N/A'} | {log.type || 'info'}</p>
+                          <p className="text-xs text-slate-700 dark:text-slate-200 break-words">{log.message || 'API event'}</p>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {(activeTab === 'database' || activeTab === 'apis') && (
