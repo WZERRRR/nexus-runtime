@@ -3693,7 +3693,15 @@ async function startServer() {
         const pm2 = linkedPm2[idx] || linkedPm2[0] || null;
         const pm2Name = pm2?.name || runtimeProcess || null;
         const port = d.proxyPort || runtimePort || Number(pm2?.pm2_env?.PORT || pm2?.pm2_env?.port || 0) || null;
-        const validated = Boolean(d.domain && runtimePath && pm2Name && port && d.nginxBinding);
+        const missing: string[] = [];
+        if (!d.domain) missing.push("domain");
+        if (!runtimePath) missing.push("runtimePath");
+        if (!pm2Name) missing.push("pm2Process");
+        if (!port) missing.push("runtimePort");
+        const validated = missing.length === 0;
+        const validationMessage = validated
+          ? null
+          : `البيئة غير مكتملة الربط التشغيلي (missing: ${missing.join(", ")})`;
         return {
           id: `${req.params.id}-${idx}`,
           name: deriveEnvName(d.domain),
@@ -3705,7 +3713,7 @@ async function startServer() {
           sslState: d.sslState,
           pm2Status: pm2?.pm2_env?.status || "offline",
           validated,
-          validationMessage: validated ? null : "البيئة غير مربوطة ببنية تشغيل فعلية",
+          validationMessage,
         };
       });
 
