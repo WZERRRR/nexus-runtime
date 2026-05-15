@@ -51,6 +51,7 @@ export function ProjectWorkspace() {
   const [runtimeLogs, setRuntimeLogs] = useState<any[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<any[]>([]);
   const [deployments, setDeployments] = useState<any[]>([]);
+  const [snapshots, setSnapshots] = useState<any[]>([]);
   const [recoveries, setRecoveries] = useState<any[]>([]);
   const [governanceEvents, setGovernanceEvents] = useState<any[]>([]);
   const [runtimeApprovals, setRuntimeApprovals] = useState<any[]>([]);
@@ -71,18 +72,21 @@ export function ProjectWorkspace() {
   const [filesystemItems, setFilesystemItems] = useState<any[]>([]);
   const [filesystemLoading, setFilesystemLoading] = useState(false);
   const [filesystemQuery, setFilesystemQuery] = useState('');
+  const [deployRunning, setDeployRunning] = useState(false);
+  const [rollbackRunningId, setRollbackRunningId] = useState<string | null>(null);
 
   const inFlightRef = useRef(false);
 
   const loadOperationalData = async (resolvedProject: any) => {
     const runtimeId = String(resolvedProject?.runtime_id || resolvedProject?.id || '');
-    const [envs, pm2, metrics, logs, events, deployRows, recoveryRows, governanceRows, approvalsRows, pendingRows, mutationTimelineRows, readiness] = await Promise.all([
+    const [envs, pm2, metrics, logs, events, deployRows, snapshotRows, recoveryRows, governanceRows, approvalsRows, pendingRows, mutationTimelineRows, readiness] = await Promise.all([
       runtimeAPI.getProjectEnvironmentBindings(resolvedProject.id).catch(() => []),
       runtimeAPI.getPM2Processes(undefined, runtimeId).catch(() => []),
       runtimeAPI.getMetrics(runtimeId).catch(() => null),
       runtimeAPI.getLogs(runtimeId).catch(() => []),
       runtimeAPI.getEvents(runtimeId, 40).catch(() => []),
       runtimeAPI.getRuntimeDeployments(runtimeId).catch(() => []),
+      runtimeAPI.getRuntimeSnapshots(runtimeId).catch(() => []),
       runtimeAPI.getRuntimeRecoveries(runtimeId).catch(() => []),
       runtimeAPI.getGovernanceActions().catch(() => []),
       runtimeAPI.getRuntimeApprovals(runtimeId).catch(() => []),
@@ -97,6 +101,7 @@ export function ProjectWorkspace() {
     setRuntimeLogs(Array.isArray(logs) ? logs : []);
     setRuntimeEvents(Array.isArray(events) ? events : []);
     setDeployments(Array.isArray(deployRows) ? deployRows : []);
+    setSnapshots(Array.isArray(snapshotRows) ? snapshotRows : []);
     setRecoveries(Array.isArray(recoveryRows) ? recoveryRows : []);
     setGovernanceEvents(Array.isArray(governanceRows) ? governanceRows : []);
     setRuntimeApprovals(Array.isArray(approvalsRows) ? approvalsRows : []);
@@ -278,6 +283,72 @@ export function ProjectWorkspace() {
     } finally {
       setTerminalRunning(false);
     }
+  };
+
+  const handlePm2Action = async (action: 'restart' | 'stop', procId: any) => {
+    if (!project || procId === undefined || procId === null) return;
+    try {
+      const numericId = Number(procId);
+      if (!Number.isFinite(numericId)) {
+        setOperationNotice({ type: 'error', message: 'لا يمكن تنفيذ العملية: معرف PM2 غير صالح' });
+        return;
+      }
+      const result = await runtimeAPI.performPM2Action(action, numericId, project.id);
+      if (!result?.success) {
+        setOperationNotice({ type: 'error', message: result?.message || 'فشل تنفيذ عملية PM2' });
+        return;
+      }
+      setOperationNotice({ type: 'success', message: `تم تنفيذ ${action.toUpperCase()} على العملية بنجاح` });
+      await loadOperationalData(project);
+    } catch {
+      setOperationNotice({ type: 'error', message: 'تعذر تنفيذ عملية PM2' });
+    }
+  };
+
+  const handleRunDeploy = async () => {
+    if (!project || deployRunning) return;
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    setDeployRunning(true);
+    try {
+      const result = await runtimeAPI.runGovernedDeploy(runtimeId, project?.git_branch || 'main');
+      setOperationNotice({
+        type: 'success',
+        message: `تم تشغيل deploy بنجاح${result?.durationMs ? ` خلال ${result.durationMs} ms` : ''}`,
+      });
+      await loadOperationalData(project);
+    } catch (e: any) {
+      setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ Deploy' });
+    } finally {
+      setDeployRunning(false);
+    }
+  };
+
+  const handleRollback = async (snapshotId?: string) => {
+    if (!project || !snapshotId || rollbackRunningId) return;
+    const runtimeId = String(project?.runtime_id || project?.id || '');
+    setRollbackRunningId(snapshotId);
+    try {
+      const result = await runtimeAPI.runRuntimeRollback(runtimeId, snapshotId);
+      setOperationNotice({
+        type: 'success',
+        message: `تم تنفيذ Rollback بنجاح${result?.durationMs ? ` خلال ${result.durationMs} ms` : ''}`,
+      });
+      await loadOperationalData(project);
+    } catch (e: any) {
+      setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ Rollback' });
+    } finally {
+      setRollbackRunningId(null);
+    }
+  };
+
+  const handleOpenEnvironment = (env: any) => {
+    if (!env?.realDomain || !env?.validated) {
+      setOperationNotice({ type: 'error', message: 'البيئة غير مربوطة ببنية تشغيل فعلية' });
+      return;
+    }
+    const domain = String(env.realDomain).trim();
+    const normalized = domain.startsWith('http://') || domain.startsWith('https://') ? domain : `https://${domain}`;
+    window.open(normalized, '_blank', 'noopener,noreferrer');
   };
 
   const handleApprovalDecision = async (approvalId: string, status: 'APPROVED' | 'REJECTED') => {
@@ -470,6 +541,24 @@ export function ProjectWorkspace() {
                   Project: {project.name} | Runtime ID: {project.runtime_id || project.id} | Path: {project.runtime_path || 'N/A'} | Environment: {project.env || 'N/A'}
                 </p>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-blue-400 mt-3">Module: {activeTabLabel}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {activeTab === 'deploy' && (
+                    <button onClick={handleRunDeploy} disabled={deployRunning} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold disabled:opacity-60">
+                      {deployRunning ? 'Running...' : 'Run Governed Deploy'}
+                    </button>
+                  )}
+                  {activeTab === 'git' && (
+                    <button onClick={() => { setTerminalInput('git pull'); handleTerminalCommand(); }} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">
+                      Git Pull (Governed)
+                    </button>
+                  )}
+                  {activeTab === 'environments' && (
+                    <span className="text-[10px] text-slate-500">Open only validated domains</span>
+                  )}
+                  {activeTab === 'recovery' && (
+                    <span className="text-[10px] text-slate-500">Snapshots: {snapshots.length}</span>
+                  )}
+                </div>
                 <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
                   <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
                     <p className="text-[10px] text-slate-500">PM2</p>
@@ -486,15 +575,29 @@ export function ProjectWorkspace() {
                 </div>
                 <div className="mt-3">
                   {activeTab === 'pm2' && (
-                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-slate-500">Deployments: {deployments.length}</p>
+                        <button onClick={handleRunDeploy} disabled={deployRunning} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold disabled:opacity-60">
+                          {deployRunning ? 'Running...' : 'Run Governed Deploy'}
+                        </button>
+                      </div>
+                      <div className="space-y-2 max-h-44 overflow-auto pr-1">
                       {pm2Processes.length === 0 ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : pm2Processes.map((proc: any) => (
                         <div key={`${proc.id}-${proc.name}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
-                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{proc.name}</p>
-                          <p className="text-[11px] text-slate-500">Status: {proc.status || 'unknown'} | CPU: {proc.cpu || 'N/A'} | RAM: {proc.ram || 'N/A'}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{proc.name}</p>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => handlePm2Action('restart', proc?.id || proc?.pid)} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">Restart</button>
+                              <button onClick={() => handlePm2Action('stop', proc?.id || proc?.pid)} className="px-2 py-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-[10px] font-bold">Stop</button>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-500">Status: {proc.status || 'unknown'} | CPU: {proc.cpu || 'N/A'} | RAM: {proc.ram || proc.mem || 'N/A'} | Uptime: {proc.uptime || 'N/A'}</p>
                         </div>
                       ))}
+                      </div>
                     </div>
                   )}
                   {activeTab === 'logs' && (
@@ -510,7 +613,7 @@ export function ProjectWorkspace() {
                     </div>
                   )}
                   {activeTab === 'deploy' && (
-                    <div className="space-y-2 max-h-52 overflow-auto pr-1">
+                    <div className="space-y-2">
                       {deployments.length === 0 ? (
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : deployments.slice(0, 30).map((row: any, idx: number) => (
@@ -527,7 +630,14 @@ export function ProjectWorkspace() {
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : recoveries.slice(0, 30).map((row: any, idx: number) => (
                         <div key={`${row.recovery_id || row.id || idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
-                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{row.recovery_type || 'Recovery'}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{row.recovery_type || 'Recovery'}</p>
+                            {snapshots.length > 0 && (
+                              <button onClick={() => handleRollback(snapshots[0]?.snapshot_id || snapshots[0]?.id)} disabled={!!rollbackRunningId} className="px-2 py-1 rounded border border-purple-500/30 bg-purple-500/10 text-purple-400 text-[10px] font-bold disabled:opacity-60">
+                                {rollbackRunningId ? 'Running...' : 'Rollback'}
+                              </button>
+                            )}
+                          </div>
                           <p className="text-[11px] text-slate-500">Status: {row.recovery_status || row.status || 'unknown'}</p>
                         </div>
                       ))}
@@ -539,7 +649,12 @@ export function ProjectWorkspace() {
                         <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لا توجد بيانات تشغيلية حالياً</p>
                       ) : environmentBindings.map((env, idx) => (
                         <div key={`${env?.name || 'env'}-${idx}`} className="rounded-lg border border-slate-200 dark:border-white/10 p-2">
-                          <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{env?.name || env?.environment || 'ENV'}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">{env?.name || env?.environment || 'ENV'}</p>
+                            <button onClick={() => handleOpenEnvironment(env)} className="px-2 py-1 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[10px] font-bold">
+                              Open
+                            </button>
+                          </div>
                           <p className="text-[11px] text-slate-500">Domain: {env?.realDomain || 'N/A'} | Port: {env?.runtimePort || 'N/A'} | SSL: {env?.sslState || 'N/A'}</p>
                         </div>
                       ))}
