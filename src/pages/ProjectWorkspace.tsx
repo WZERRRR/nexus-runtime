@@ -42,6 +42,7 @@ type AiPlanStep =
   | { kind: 'git'; label: string; command: string }
   | { kind: 'pm2'; label: string; action: 'restart' | 'stop' }
   | { kind: 'tab'; label: string; tab: WorkspaceTabId };
+type AiExecutionEntry = { step: string; status: 'ok' | 'failed' | 'skipped'; detail?: string };
 const EMPTY_OPERATIONAL = 'لا توجد بيانات تشغيلية حالياً';
 
 export function ProjectWorkspace() {
@@ -86,6 +87,8 @@ export function ProjectWorkspace() {
   const [aiPlan, setAiPlan] = useState<AiPlanStep[]>([]);
   const [aiRunning, setAiRunning] = useState(false);
   const [aiLog, setAiLog] = useState<string[]>([]);
+  const [aiApproved, setAiApproved] = useState(false);
+  const [aiExecutionReport, setAiExecutionReport] = useState<{ total: number; ok: number; failed: number; skipped: number; entries: AiExecutionEntry[] } | null>(null);
 
   const inFlightRef = useRef(false);
 
@@ -309,58 +312,99 @@ export function ProjectWorkspace() {
     if (steps.length === 0) steps.push({ kind: 'refresh', label: 'Refresh operational data' });
     return steps;
   };
+  const isSensitiveStep = (step: AiPlanStep) => step.kind === 'deploy' || step.kind === 'pm2';
+  const hasSensitivePlan = useMemo(() => aiPlan.some(isSensitiveStep), [aiPlan]);
 
   const handleBuildAiPlan = () => {
     const plan = parseAiPlan(aiCommand.trim());
     setAiPlan(plan);
+    setAiApproved(false);
+    setAiExecutionReport(null);
     setAiLog((prev) => [`Plan created with ${plan.length} step(s).`, ...prev].slice(0, 40));
   };
 
   const handleRunAiPlan = async () => {
     if (!project || aiRunning || aiPlan.length === 0) return;
+    if (hasSensitivePlan && !aiApproved) {
+      setOperationNotice({ type: 'error', message: 'الخطة تحتوي عمليات حساسة. يرجى اعتماد التنفيذ أولاً.' });
+      return;
+    }
     setAiRunning(true);
+    const entries: AiExecutionEntry[] = [];
+    let ok = 0;
+    let failed = 0;
+    let skipped = 0;
     try {
       for (let idx = 0; idx < aiPlan.length; idx += 1) {
         const step = aiPlan[idx];
         setAiLog((prev) => [`[${idx + 1}/${aiPlan.length}] ${step.label}`, ...prev].slice(0, 40));
-        if (step.kind === 'tab') {
-          setActiveTab(step.tab);
-          continue;
-        }
-        if (step.kind === 'refresh') {
-          await handleRefresh();
-          continue;
-        }
-        if (step.kind === 'deploy') {
-          await handleRunDeploy();
-          continue;
-        }
-        if (step.kind === 'readiness') {
-          await handleReadinessDrill();
-          continue;
-        }
-        if (step.kind === 'git') {
-          await runScopedCommand(step.command);
-          continue;
-        }
-        if (step.kind === 'pm2') {
-          if (pm2Processes.length === 0) {
-            setAiLog((prev) => [`No PM2 processes found for ${step.action}.`, ...prev].slice(0, 40));
+        try {
+          if (step.kind === 'tab') {
+            setActiveTab(step.tab);
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
             continue;
           }
-          for (const proc of pm2Processes) {
-            const rawId = proc?.id ?? proc?.pm_id ?? proc?.pid;
-            const numericId = Number(rawId);
-            if (!Number.isFinite(numericId)) continue;
-            await runtimeAPI.performPM2Action(step.action, numericId, project.id);
+          if (step.kind === 'refresh') {
+            await handleRefresh();
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
+            continue;
           }
-          await loadOperationalData(project);
+          if (step.kind === 'deploy') {
+            await handleRunDeploy();
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
+            continue;
+          }
+          if (step.kind === 'readiness') {
+            await handleReadinessDrill();
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
+            continue;
+          }
+          if (step.kind === 'git') {
+            await runScopedCommand(step.command);
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
+            continue;
+          }
+          if (step.kind === 'pm2') {
+            if (pm2Processes.length === 0) {
+              setAiLog((prev) => [`No PM2 processes found for ${step.action}.`, ...prev].slice(0, 40));
+              entries.push({ step: step.label, status: 'skipped', detail: 'No PM2 processes found' });
+              skipped += 1;
+              continue;
+            }
+            for (const proc of pm2Processes) {
+              const rawId = proc?.id ?? proc?.pm_id ?? proc?.pid;
+              const numericId = Number(rawId);
+              if (!Number.isFinite(numericId)) continue;
+              await runtimeAPI.performPM2Action(step.action, numericId, project.id);
+            }
+            await loadOperationalData(project);
+            entries.push({ step: step.label, status: 'ok' });
+            ok += 1;
+            continue;
+          }
+          entries.push({ step: step.label, status: 'skipped', detail: 'Unknown step type' });
+          skipped += 1;
+        } catch (stepError: any) {
+          entries.push({ step: step.label, status: 'failed', detail: stepError?.message || 'Step execution failed' });
+          failed += 1;
         }
       }
       setOperationNotice({ type: 'success', message: `تم تنفيذ خطة AI بعدد ${aiPlan.length} خطوة` });
     } catch (e: any) {
       setOperationNotice({ type: 'error', message: e?.message || 'فشل تنفيذ خطة AI' });
     } finally {
+      setAiExecutionReport({
+        total: aiPlan.length,
+        ok,
+        failed,
+        skipped,
+        entries,
+      });
       setAiRunning(false);
     }
   };
@@ -592,10 +636,22 @@ export function ProjectWorkspace() {
             <button onClick={handleBuildAiPlan} className="px-3 py-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-bold">
               Build Plan
             </button>
+            <button
+              onClick={() => setAiApproved(true)}
+              disabled={!hasSensitivePlan}
+              className="px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-bold disabled:opacity-50"
+            >
+              Approve Sensitive
+            </button>
             <button onClick={handleRunAiPlan} disabled={aiRunning || aiPlan.length === 0} className="px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-300 text-xs font-bold disabled:opacity-60">
               {aiRunning ? 'Running...' : 'Run Plan'}
             </button>
           </div>
+          {hasSensitivePlan && (
+            <p className={`mt-2 text-[11px] font-bold ${aiApproved ? 'text-emerald-400' : 'text-amber-300'}`}>
+              {aiApproved ? 'Sensitive operations approved.' : 'Plan includes sensitive operations (deploy/pm2). Approval required.'}
+            </p>
+          )}
           <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
             <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
               <p className="text-[10px] text-slate-500 mb-1">Planned Steps</p>
@@ -622,6 +678,21 @@ export function ProjectWorkspace() {
               )}
             </div>
           </div>
+          {aiExecutionReport && (
+            <div className="mt-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-2">
+              <p className="text-[10px] text-slate-500 mb-1">Execution Report</p>
+              <p className="text-xs text-slate-700 dark:text-slate-200">
+                Total: {aiExecutionReport.total} | OK: {aiExecutionReport.ok} | Failed: {aiExecutionReport.failed} | Skipped: {aiExecutionReport.skipped}
+              </p>
+              <div className="space-y-1 max-h-20 overflow-auto pr-1 mt-1">
+                {aiExecutionReport.entries.map((entry, idx) => (
+                  <p key={`${entry.step}-${idx}`} className="text-xs text-slate-700 dark:text-slate-200">
+                    {idx + 1}. {entry.step} [{entry.status}] {entry.detail ? `- ${entry.detail}` : ''}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-1.5 text-[11px]">
