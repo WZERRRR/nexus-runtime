@@ -83,6 +83,7 @@ export function ProjectWorkspace() {
   const [filesystemQuery, setFilesystemQuery] = useState('');
   const [deployRunning, setDeployRunning] = useState(false);
   const [rollbackRunningId, setRollbackRunningId] = useState<string | null>(null);
+  const [pendingApprovalId, setPendingApprovalId] = useState<string | null>(null);
   const [aiCommand, setAiCommand] = useState('');
   const [aiPlan, setAiPlan] = useState<AiPlanStep[]>([]);
   const [aiRunning, setAiRunning] = useState(false);
@@ -463,6 +464,8 @@ export function ProjectWorkspace() {
     setTerminalInput('');
     try {
       const res = await runtimeAPI.executeTerminalCommand(cmd, project.runtime_path || undefined, project.id);
+      const terminalPendingHandled = await handlePendingApprovalFlow(res?.data);
+      if (terminalPendingHandled) return;
       if (res?.success && res.data) {
         if (res.data.stdout) setTerminalOutput((prev) => [...prev, res.data!.stdout]);
         if (res.data.stderr) setTerminalOutput((prev) => [...prev, res.data!.stderr]);
@@ -481,6 +484,8 @@ export function ProjectWorkspace() {
     setTerminalOutput((prev) => [...prev, `> ${cmd}`]);
     try {
       const res = await runtimeAPI.executeTerminalCommand(cmd, project.runtime_path || undefined, project.id);
+      const scopedPendingHandled = await handlePendingApprovalFlow(res?.data);
+      if (scopedPendingHandled) return;
       if (res?.success && res.data) {
         if (res.data.stdout) setTerminalOutput((prev) => [...prev, res.data.stdout]);
         if (res.data.stderr) setTerminalOutput((prev) => [...prev, res.data.stderr]);
@@ -494,6 +499,19 @@ export function ProjectWorkspace() {
     }
   };
 
+  const handlePendingApprovalFlow = async (resultData: any) => {
+    const pendingId = String(resultData?.requestedApprovalId || '');
+    const pendingStatus = String(resultData?.status || '').toUpperCase();
+    if (pendingStatus === 'PENDING_APPROVAL' && pendingId) {
+      setPendingApprovalId(pendingId);
+      setActiveTab('governance');
+      setOperationNotice({ type: 'success', message: `تم تسجيل طلب موافقة تشغيلية: ${pendingId}` });
+      if (project) await loadOperationalData(project);
+      return true;
+    }
+    return false;
+  };
+
   const handlePm2Action = async (action: 'restart' | 'stop', procId: any) => {
     if (!project || procId === undefined || procId === null) return;
     try {
@@ -503,6 +521,8 @@ export function ProjectWorkspace() {
         return;
       }
       const result = await runtimeAPI.performPM2Action(action, numericId, project.id);
+      const pm2PendingHandled = await handlePendingApprovalFlow(result?.data);
+      if (pm2PendingHandled) return;
       if (!result?.success) {
         setOperationNotice({ type: 'error', message: result?.message || 'فشل تنفيذ عملية PM2' });
         return;
@@ -520,6 +540,8 @@ export function ProjectWorkspace() {
     setDeployRunning(true);
     try {
       const result = await runtimeAPI.runGovernedDeploy(runtimeId, project?.git_branch || 'main');
+      const deployPendingHandled = await handlePendingApprovalFlow(result);
+      if (deployPendingHandled) return;
       setOperationNotice({
         type: 'success',
         message: `تم تشغيل deploy بنجاح${result?.durationMs ? ` خلال ${result.durationMs} ms` : ''}`,
@@ -538,6 +560,8 @@ export function ProjectWorkspace() {
     setRollbackRunningId(snapshotId);
     try {
       const result = await runtimeAPI.runRuntimeRollback(runtimeId, snapshotId);
+      const rollbackPendingHandled = await handlePendingApprovalFlow(result);
+      if (rollbackPendingHandled) return;
       setOperationNotice({
         type: 'success',
         message: `تم تنفيذ Rollback بنجاح${result?.durationMs ? ` خلال ${result.durationMs} ms` : ''}`,
@@ -570,6 +594,7 @@ export function ProjectWorkspace() {
         return;
       }
       setOperationNotice({ type: 'success', message: status === 'APPROVED' ? 'تمت الموافقة وتنفيذ العملية' : 'تم رفض العملية التشغيلية' });
+      setPendingApprovalId((current) => (current === approvalId ? null : current));
       await loadOperationalData(project);
     } catch {
       setOperationNotice({ type: 'error', message: 'تعذر تحديث حالة الموافقة' });
@@ -1180,6 +1205,9 @@ export function ProjectWorkspace() {
                   .map((row: any) => (
                     <div key={row.id} className="rounded-md border border-slate-200 dark:border-white/10 p-2">
                       <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.operation_type || 'operation'}</p>
+                      {pendingApprovalId && String(row.id) === pendingApprovalId ? (
+                        <p className="text-[10px] font-bold text-amber-400">Current request</p>
+                      ) : null}
                       <p className="text-[10px] text-slate-500">{row.id} | Risk: {row.risk_level || 'N/A'}</p>
                       <p className="text-[10px] text-slate-500">Stage: {Number(row.stage_index || 1)} / {Number(row.total_stages || 1)} | Role: {row.required_role || 'Admin'}</p>
                       <div className="mt-1.5 flex items-center gap-1">
